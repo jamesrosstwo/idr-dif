@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import cv2
 import argparse
 from glob import glob
+from pathlib import Path
 import os
+
 
 import utils.general as utils
 
@@ -229,9 +231,13 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
     if opt.dtu:
-        source_dir = '../data/DTU'
-        scene_dirs = sorted(glob(os.path.join(source_dir, "scan*")))
+
+        source_dir = "../data" / Path("DTU") / "scan*"
+        print(source_dir.absolute())
+        scene_dirs = sorted(glob(str(source_dir)))
+        print(scene_dirs)
         for scene_dir in scene_dirs:
+            print(scene_dir)
             get_normalization(scene_dir,opt.use_linear_init)
     else:
         get_normalization(opt.source_dir, opt.use_linear_init)
