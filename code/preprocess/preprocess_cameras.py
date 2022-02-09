@@ -144,7 +144,7 @@ def get_normalization_function(Ps,mask_points_all,number_of_normalization_points
         observerved_in_all = True
         max_d_all = 1e10
         min_d_all = 1e-10
-        for j in range(1, number_of_cameras, 5):
+        for j in range(1, number_of_cameras):
             min_d, max_d = get_min_max_d(curx, cury, Ps[j], mask_points_all[j], P_0, Fs[j], j)
 
             if abs(min_d) < 0.00001:

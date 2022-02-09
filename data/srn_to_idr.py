@@ -1,5 +1,7 @@
 import math
+import os
 import shutil
+import sys
 from pathlib import Path
 
 import cv2
@@ -8,17 +10,13 @@ import torch
 
 
 # From the SRN Repository: https://github.com/vsitzmann/scene-representation-networks/blob/8165b500816bb1699f5a34782455f2c4b6d4f35a/util.py#L44
-def parse_intrinsics(filepath, trgt_sidelength=None, invert_y=False, img_width=None, img_height=None):
+def parse_intrinsics(filepath, trgt_sidelength=None, invert_y=False):
     # Get camera intrinsics
     with open(filepath, 'r') as file:
         f, cx, cy, _ = map(float, file.readline().split())
         grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
         scale = float(file.readline())
         height, width = map(float, file.readline().split())
-        if img_width:
-            width = img_width
-        if img_height:
-            height = img_height
 
         try:
             world2cam_poses = int(file.readline())
@@ -62,42 +60,28 @@ def load_pose(filename):
         return np.asarray(lines).astype(np.float32).squeeze()
 
 
-def convert_car_by_id(id, base_path="cars_train", n_views=250, delete_existing=False, desired_img_shape=None):
-    in_path = Path(base_path) / id
-
+def converted_srn(in_path: Path, out_path: Path, n_views=250, start_idx=0, overwrite=False, img_sz=None):
     # --- Create output paths ---
-    base_out_path = Path('idr') / id
+    if overwrite and out_path.exists():
+        shutil.rmtree(str(out_path))
 
-    if delete_existing and base_out_path.exists():
-        shutil.rmtree(str(base_out_path))
-
-    images_path = base_out_path / "image"
-    mask_path = base_out_path / "mask"
-    base_out_path.mkdir(parents=True)
-    images_path.mkdir()
-    mask_path.mkdir()
+    images_path = out_path / "image"
+    mask_path = out_path / "mask"
+    out_path.mkdir(parents=True, exist_ok=True)
+    images_path.mkdir(exist_ok=True)
+    mask_path.mkdir(exist_ok=True)
 
     # --- Camera Information ---
     full_intrinsic, grid_barycenter, scale, world2cam_poses = parse_intrinsics(in_path / "intrinsics.txt",
-                                                                               img_width=desired_img_shape[0],
-                                                                               img_height=desired_img_shape[1])
+                                                                               trgt_sidelength=img_sz)
     cam_npz = dict()
 
     for i in range(n_views):
-        filled_id = str(i).zfill(6)
+        base_filled_id = str(i).zfill(6)
+        filled_id = str(i + start_idx).zfill(6)
         img_filename = filled_id + ".png"
-        rgb_path = in_path / "rgb" / img_filename
+        rgb_path = in_path / "rgb" / (base_filled_id + ".png")
         img = cv2.imread(str(rgb_path))
-
-        # Resize to correct shape
-        if desired_img_shape:
-            min_resize_dims = (min(desired_img_shape), min(desired_img_shape))
-            img = cv2.resize(img, min_resize_dims)
-            pad_amt = (max(desired_img_shape) - min(desired_img_shape)) / 2.0
-            pad_amts = int(math.floor(pad_amt)), int(math.ceil(pad_amt))
-            pad_axis = np.argmax(desired_img_shape)
-            if pad_axis == 0:
-                img = cv2.copyMakeBorder(img, 0, 0, *pad_amts, cv2.BORDER_REPLICATE)
 
         cv2.imwrite(str(images_path / img_filename), img)
 
@@ -109,16 +93,47 @@ def convert_car_by_id(id, base_path="cars_train", n_views=250, delete_existing=F
         flooded = cv2.floodFill(im_gray, mask, (2, 2), 255)[2]
         _, mask = cv2.threshold(flooded, 0, 1, cv2.THRESH_BINARY_INV)
         mask = mask[1:-1, 1:-1] * 255
+        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
         cv2.imwrite(str(mask_path / img_filename), mask)
 
-        pose = load_pose(in_path / "pose" / (filled_id + ".txt"))
-        cam_mx = full_intrinsic @ pose
-        cam_npz["world_mat_" + str(i)] = cam_mx
-        # cam_npz["scale_mat_" + str(i)] = np.identity(4)
+        pose = load_pose(in_path / "pose" / (base_filled_id + ".txt"))
+        extrinsic = np.linalg.inv(pose)
+        cam_mx = full_intrinsic @ extrinsic
+        cam_npz["world_mat_" + str(i + start_idx)] = cam_mx
+        cam_npz["scale_mat_" + str(i + start_idx)] = np.identity(4)
+    return cam_npz
 
-    np.savez(str(base_out_path / "cameras.npz"), **cam_npz)
+
+def converted_srn_collection(in_path: Path, out_path: Path, n_views=250, n_objs=None, overwrite=False, img_sz=None):
+    if overwrite and out_path.exists():
+        shutil.rmtree(str(out_path))
+
+    images_path = out_path / "image"
+    mask_path = out_path / "mask"
+    out_path.mkdir(parents=True)
+    images_path.mkdir()
+    mask_path.mkdir()
+    cam_npz = dict()
+
+    i = 0
+    in_paths = list(in_path.glob("*"))
+    if isinstance(n_objs, int):
+        in_paths = in_paths[:n_objs]
+
+    for sub_path in in_paths:
+        if os.path.isdir(sub_path):
+            print("Converting", sub_path)
+            new_data = converted_srn(sub_path, out_path, n_views=n_views, start_idx=i * n_views,
+                                     overwrite=False,
+                                     img_sz=img_sz)
+            cam_npz.update(new_data)
+            i += 1
+    return cam_npz
 
 
 if __name__ == "__main__":
-    convert_car_by_id("1a1dcd236a1e6133860800e6696b8284", delete_existing=True, desired_img_shape=(1600, 1200))
+    in_path = Path("cars_train")
+    out_path = Path("idr/scan_collection")
+    cam_npz = converted_srn_collection(in_path, out_path, overwrite=True, img_sz=128, n_objs=10)
+    np.savez(str(out_path / "cameras.npz"), **cam_npz)

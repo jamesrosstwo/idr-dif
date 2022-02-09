@@ -38,7 +38,10 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
                                        sdf=lambda x: model.implicit_network(x)[:, 0],
                                        resolution=resolution
                                        )
-    data.append(surface_traces[0])
+    try:
+        data.append(surface_traces[0])
+    except TypeError:
+        return
 
     # plot cameras locations
     for i, loc, dir in zip(indices, cam_loc, cam_dir):
