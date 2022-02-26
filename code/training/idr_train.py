@@ -7,8 +7,9 @@ import torch
 import utils.general as utils
 import utils.plots as plt
 
+
 class IDRTrainRunner():
-    def __init__(self,**kwargs):
+    def __init__(self, **kwargs):
         torch.set_default_dtype(torch.float32)
         torch.set_num_threads(1)
 
@@ -20,13 +21,14 @@ class IDRTrainRunner():
         self.train_cameras = kwargs['train_cameras']
 
         self.expname = self.conf.get_string('train.expname') + kwargs['expname']
-        scan_id = kwargs['scan_id'] if kwargs['scan_id'] != -1 else self.conf.get_int('dataset.scan_id', default=-1)
-        if scan_id != -1:
-            self.expname = self.expname + '_{0}'.format(scan_id)
+        collection = kwargs['collection_id'] if kwargs['collection_id'] != -1 else self.conf.get_int(
+            'dataset.collection_id', default=-1)
+        if collection != -1:
+            self.expname = self.expname + '_{0}'.format(collection)
 
         if kwargs['is_continue'] and kwargs['timestamp'] == 'latest':
-            if os.path.exists(os.path.join('../',kwargs['exps_folder_name'],self.expname)):
-                timestamps = os.listdir(os.path.join('../',kwargs['exps_folder_name'],self.expname))
+            if os.path.exists(os.path.join('../', kwargs['exps_folder_name'], self.expname)):
+                timestamps = os.listdir(os.path.join('../', kwargs['exps_folder_name'], self.expname))
                 if (len(timestamps)) == 0:
                     is_continue = False
                     timestamp = None
@@ -40,7 +42,7 @@ class IDRTrainRunner():
             timestamp = kwargs['timestamp']
             is_continue = kwargs['is_continue']
 
-        utils.mkdir_ifnotexists(os.path.join('../',self.exps_folder_name))
+        utils.mkdir_ifnotexists(os.path.join('../', self.exps_folder_name))
         self.expdir = os.path.join('../', self.exps_folder_name, self.expname)
         utils.mkdir_ifnotexists(self.expdir)
         self.timestamp = '{:%Y_%m_%d_%H_%M_%S}'.format(datetime.now())
@@ -67,7 +69,8 @@ class IDRTrainRunner():
             utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir))
             utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.cam_params_subdir))
 
-        os.system("""cp -r {0} "{1}" """.format(kwargs['conf'], os.path.join(self.expdir, self.timestamp, 'runconf.conf')))
+        os.system(
+            """cp -r {0} "{1}" """.format(kwargs['conf'], os.path.join(self.expdir, self.timestamp, 'runconf.conf')))
 
         if (not self.GPU_INDEX == 'ignore'):
             os.environ["CUDA_VISIBLE_DEVICES"] = '{0}'.format(self.GPU_INDEX)
@@ -77,8 +80,9 @@ class IDRTrainRunner():
         print('Loading data ...')
 
         dataset_conf = self.conf.get_config('dataset')
-        if kwargs['scan_id'] != -1:
-            dataset_conf['scan_id'] = kwargs['scan_id']
+        if kwargs['collection_id'] != -1:
+            dataset_conf['collection_id'] = kwargs['collection_id']
+            
 
         self.train_dataset = utils.get_class(self.conf.get_string('train.dataset_class'))(self.train_cameras,
                                                                                           **dataset_conf)
@@ -106,7 +110,8 @@ class IDRTrainRunner():
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.sched_milestones = self.conf.get_list('train.sched_milestones', default=[])
         self.sched_factor = self.conf.get_float('train.sched_factor', default=0.0)
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, self.sched_milestones, gamma=self.sched_factor)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, self.sched_milestones,
+                                                              gamma=self.sched_factor)
 
         # settings for camera optimization
         if self.train_cameras:
@@ -114,7 +119,8 @@ class IDRTrainRunner():
             self.pose_vecs = torch.nn.Embedding(num_images, 7, sparse=True).cuda()
             self.pose_vecs.weight.data.copy_(self.train_dataset.get_pose_init())
 
-            self.optimizer_cam = torch.optim.SparseAdam(self.pose_vecs.parameters(), self.conf.get_float('train.learning_rate_cam'))
+            self.optimizer_cam = torch.optim.SparseAdam(self.pose_vecs.parameters(),
+                                                        self.conf.get_float('train.learning_rate_cam'))
 
         self.start_epoch = 0
         if is_continue:
@@ -135,7 +141,8 @@ class IDRTrainRunner():
 
             if self.train_cameras:
                 data = torch.load(
-                    os.path.join(old_checkpnts_dir, self.optimizer_cam_params_subdir, str(kwargs['checkpoint']) + ".pth"))
+                    os.path.join(old_checkpnts_dir, self.optimizer_cam_params_subdir,
+                                 str(kwargs['checkpoint']) + ".pth"))
                 self.optimizer_cam.load_state_dict(data["optimizer_cam_state_dict"])
 
                 data = torch.load(

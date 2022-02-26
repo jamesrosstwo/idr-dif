@@ -1,7 +1,6 @@
-import math
 import os
 import shutil
-import sys
+import json
 from pathlib import Path
 
 import cv2
@@ -60,7 +59,8 @@ def load_pose(filename):
         return np.asarray(lines).astype(np.float32).squeeze()
 
 
-def converted_srn(in_path: Path, out_path: Path, n_views=250, start_idx=0, overwrite=False, img_sz=None):
+def converted_srn(in_path: Path, out_path: Path, n_views=250, overwrite=False, img_sz=None):
+    print(out_path)
     # --- Create output paths ---
     if overwrite and out_path.exists():
         shutil.rmtree(str(out_path))
@@ -78,8 +78,8 @@ def converted_srn(in_path: Path, out_path: Path, n_views=250, start_idx=0, overw
 
     for i in range(n_views):
         base_filled_id = str(i).zfill(6)
-        filled_id = str(i + start_idx).zfill(6)
-        img_filename = filled_id + ".png"
+        filled_id = str(i).zfill(6)
+        img_filename = "{0}.png".format(filled_id)
         rgb_path = in_path / "rgb" / (base_filled_id + ".png")
         img = cv2.imread(str(rgb_path))
 
@@ -97,11 +97,12 @@ def converted_srn(in_path: Path, out_path: Path, n_views=250, start_idx=0, overw
 
         cv2.imwrite(str(mask_path / img_filename), mask)
 
-        pose = load_pose(in_path / "pose" / (base_filled_id + ".txt"))
+        pose = load_pose(in_path / "pose" / ("{0}.txt".format(base_filled_id)))
         extrinsic = np.linalg.inv(pose)
         cam_mx = full_intrinsic @ extrinsic
-        cam_npz["world_mat_" + str(i + start_idx)] = cam_mx
-        cam_npz["scale_mat_" + str(i + start_idx)] = np.identity(4)
+        cam_npz["world_mat_{0}".format(i)] = cam_mx
+        cam_npz["scale_mat_{0}".format(i)] = np.identity(4)
+        np.savez(str(out_path / "cameras.npz"), **cam_npz)
     return cam_npz
 
 
@@ -109,12 +110,8 @@ def converted_srn_collection(in_path: Path, out_path: Path, n_views=250, n_objs=
     if overwrite and out_path.exists():
         shutil.rmtree(str(out_path))
 
-    images_path = out_path / "image"
-    mask_path = out_path / "mask"
-    out_path.mkdir(parents=True)
-    images_path.mkdir()
-    mask_path.mkdir()
-    cam_npz = dict()
+
+    specs = dict()
 
     i = 0
     in_paths = list(in_path.glob("*"))
@@ -124,16 +121,15 @@ def converted_srn_collection(in_path: Path, out_path: Path, n_views=250, n_objs=
     for sub_path in in_paths:
         if os.path.isdir(sub_path):
             print("Converting", sub_path)
-            new_data = converted_srn(sub_path, out_path, n_views=n_views, start_idx=i * n_views,
-                                     overwrite=False,
-                                     img_sz=img_sz)
-            cam_npz.update(new_data)
+            converted_srn(sub_path, out_path / "scan{0}".format(i), n_views=n_views, overwrite=False, img_sz=img_sz)
             i += 1
-    return cam_npz
+    specs["n_objs"] = i
+    with open(str(out_path / "specs.json"), "w") as f:
+        json.dump(specs, f)
+
 
 
 if __name__ == "__main__":
     in_path = Path("cars_train")
-    out_path = Path("idr/scan_collection")
-    cam_npz = converted_srn_collection(in_path, out_path, overwrite=True, img_sz=128, n_objs=10)
-    np.savez(str(out_path / "cameras.npz"), **cam_npz)
+    out_path = Path("idr/collection5")
+    converted_srn_collection(in_path, out_path, overwrite=True, img_sz=128, n_objs=2)
