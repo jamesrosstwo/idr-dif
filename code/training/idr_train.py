@@ -82,10 +82,13 @@ class IDRTrainRunner():
         dataset_conf = self.conf.get_config('dataset')
         if kwargs['collection_id'] != -1:
             dataset_conf['collection_id'] = kwargs['collection_id']
-            
 
         self.train_dataset = utils.get_class(self.conf.get_string('train.dataset_class'))(self.train_cameras,
                                                                                           **dataset_conf)
+        self.n_objs = self.train_dataset.n_objs
+
+        self.latent_vectors = [torch.rand((self.conf.get_int('model.latent_vector_size')), requires_grad=True) for _ in
+                               range(self.n_objs)]
 
         print('Finish loading data ...')
 
@@ -200,6 +203,8 @@ class IDRTrainRunner():
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
     def run(self):
+        print("initializing latent table...")
+
         print("training...")
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
@@ -220,6 +225,7 @@ class IDRTrainRunner():
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
+                model_input["obj"] = self.latent_vectors[model_input["obj"]]
 
                 if self.train_cameras:
                     pose_input = self.pose_vecs(indices.cuda())
@@ -263,6 +269,7 @@ class IDRTrainRunner():
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
+                model_input["obj"] = self.latent_vectors[model_input["obj"]]
 
                 if self.train_cameras:
                     pose_input = self.pose_vecs(indices.cuda())

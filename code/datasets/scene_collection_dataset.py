@@ -78,6 +78,7 @@ class SceneCollectionDataset(torch.utils.data.Dataset):
                 object_mask = rend_util.load_mask(path)
                 object_mask = object_mask.reshape(-1)
                 self.object_masks.append(torch.from_numpy(object_mask).bool())
+        self.obj_idxs = torch.tensor(self.obj_idxs)
 
     def __len__(self):
         return self.n_images
@@ -91,6 +92,7 @@ class SceneCollectionDataset(torch.utils.data.Dataset):
             "object_mask": self.object_masks[idx],
             "uv": uv,
             "intrinsics": self.intrinsics_all[idx],
+            "obj": self.obj_idxs[idx]
         }
 
         ground_truth = {
