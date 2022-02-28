@@ -8,6 +8,7 @@ import torch
 import pickle
 import utils.general as utils
 import utils.plots as plt
+import tqdm
 
 
 class IDRTrainRunner:
@@ -304,7 +305,7 @@ class IDRTrainRunner:
             random.shuffle(datapoints)
 
 
-            for data_index, (indices, model_input, ground_truth) in enumerate(datapoints):
+            for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints), total=len(datapoints)):
 
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()

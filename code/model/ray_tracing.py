@@ -27,7 +27,8 @@ class RayTracing(nn.Module):
                 sdf,
                 cam_loc,
                 object_mask,
-                ray_directions
+                ray_directions,
+                log=False
                 ):
 
         batch_size, num_pixels, _ = ray_directions.shape
@@ -59,10 +60,11 @@ class RayTracing(nn.Module):
             acc_start_dis[sampler_mask] = sampler_dists[sampler_mask]
             network_object_mask[sampler_mask] = sampler_net_obj_mask[sampler_mask]
 
-        print('----------------------------------------------------------------')
-        print('RayTracing: object = {0}/{1}, secant on {2}/{3}.'
-              .format(network_object_mask.sum(), len(network_object_mask), sampler_net_obj_mask.sum(), sampler_mask.sum()))
-        print('----------------------------------------------------------------')
+        if log:
+            print('----------------------------------------------------------------')
+            print('RayTracing: object = {0}/{1}, secant on {2}/{3}.'
+                  .format(network_object_mask.sum(), len(network_object_mask), sampler_net_obj_mask.sum(), sampler_mask.sum()))
+            print('----------------------------------------------------------------')
 
         if not self.training:
             return curr_start_points, \
