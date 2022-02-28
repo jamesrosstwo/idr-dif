@@ -7,10 +7,17 @@ from model.embedder import *
 from model.ray_tracing import RayTracing
 from model.sample_network import SampleNetwork
 
+
+def add_latent(x, latent_code):
+    code_const = torch.broadcast_to(latent_code, (x.shape[0], latent_code.shape[1]))
+    return torch.cat([x, code_const], dim=1)
+
+
 class ImplicitNetwork(nn.Module):
     def __init__(
             self,
             feature_vector_size,
+            latent_code_size,
             d_in,
             d_out,
             dims,
@@ -29,6 +36,9 @@ class ImplicitNetwork(nn.Module):
             embed_fn, input_ch = get_embedder(multires)
             self.embed_fn = embed_fn
             dims[0] = input_ch
+
+        dims[0] += latent_code_size
+
 
         self.num_layers = len(dims)
         self.skip_in = skip_in
@@ -64,10 +74,11 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, input, compute_grad=False):
+    def forward(self, input, latent_code, compute_grad=False):
         if self.embed_fn is not None:
             input = self.embed_fn(input)
 
+        input = add_latent(input, latent_code)
         x = input
 
         for l in range(0, self.num_layers - 1):
@@ -83,9 +94,9 @@ class ImplicitNetwork(nn.Module):
 
         return x
 
-    def gradient(self, x):
+    def gradient(self, x, latent_code):
         x.requires_grad_(True)
-        y = self.forward(x)[:,:1]
+        y = self.forward(x, latent_code)[:, :1]
         d_output = torch.ones_like(y, requires_grad=False, device=y.device)
         gradients = torch.autograd.grad(
             outputs=y,
@@ -96,10 +107,12 @@ class ImplicitNetwork(nn.Module):
             only_inputs=True)[0]
         return gradients.unsqueeze(1)
 
+
 class RenderingNetwork(nn.Module):
     def __init__(
             self,
             feature_vector_size,
+            latent_vector_size,
             mode,
             d_in,
             d_out,
@@ -110,7 +123,7 @@ class RenderingNetwork(nn.Module):
         super().__init__()
 
         self.mode = mode
-        dims = [d_in + feature_vector_size] + dims + [d_out]
+        dims = [d_in + feature_vector_size + latent_vector_size] + dims + [d_out]
 
         self.embedview_fn = None
         if multires_view > 0:
@@ -132,7 +145,7 @@ class RenderingNetwork(nn.Module):
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
 
-    def forward(self, points, normals, view_dirs, feature_vectors):
+    def forward(self, points, normals, view_dirs, feature_vectors, latent_code):
         if self.embedview_fn is not None:
             view_dirs = self.embedview_fn(view_dirs)
 
@@ -143,7 +156,7 @@ class RenderingNetwork(nn.Module):
         elif self.mode == 'no_normal':
             rendering_input = torch.cat([points, view_dirs, feature_vectors], dim=-1)
 
-        x = rendering_input
+        x = add_latent(rendering_input, latent_code)
 
         for l in range(0, self.num_layers - 1):
             lin = getattr(self, "lin" + str(l))
@@ -156,12 +169,20 @@ class RenderingNetwork(nn.Module):
         x = self.tanh(x)
         return x
 
+
 class IDRNetwork(nn.Module):
     def __init__(self, conf):
         super().__init__()
         self.feature_vector_size = conf.get_int('feature_vector_size')
-        self.implicit_network = ImplicitNetwork(self.feature_vector_size, **conf.get_config('implicit_network'))
-        self.rendering_network = RenderingNetwork(self.feature_vector_size, **conf.get_config('rendering_network'))
+
+        implicit_conf = conf.get_config('implicit_network')
+        implicit_conf["latent_code_size"] = conf.get_int('latent_vector_size')
+
+        rendering_conf = conf.get_config('rendering_network')
+        rendering_conf["latent_vector_size"] = conf.get_int('latent_vector_size')
+
+        self.implicit_network = ImplicitNetwork(self.feature_vector_size, **implicit_conf)
+        self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
         self.ray_tracer = RayTracing(**conf.get_config('ray_tracer'))
         self.sample_network = SampleNetwork()
         self.object_bounding_sphere = conf.get_float('ray_tracer.object_bounding_sphere')
@@ -173,6 +194,7 @@ class IDRNetwork(nn.Module):
         uv = input["uv"]
         pose = input["pose"]
         object_mask = input["object_mask"].reshape(-1)
+        latent_code = input["obj"]
 
         ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
 
@@ -180,7 +202,11 @@ class IDRNetwork(nn.Module):
 
         self.implicit_network.eval()
         with torch.no_grad():
-            points, network_object_mask, dists = self.ray_tracer(sdf=lambda x: self.implicit_network(x)[:, 0],
+
+            def sdf_fn(x):
+                return self.implicit_network(x, latent_code)[:, 0]
+
+            points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
                                                                  cam_loc=cam_loc,
                                                                  object_mask=object_mask,
                                                                  ray_directions=ray_dirs)
@@ -188,7 +214,7 @@ class IDRNetwork(nn.Module):
 
         points = (cam_loc.unsqueeze(1) + dists.reshape(batch_size, num_pixels, 1) * ray_dirs).reshape(-1, 3)
 
-        sdf_output = self.implicit_network(points)[:, 0:1]
+        sdf_output = self.implicit_network(points, latent_code)[:, 0:1]
         ray_dirs = ray_dirs.reshape(-1, 3)
 
         if self.training:
@@ -210,10 +236,10 @@ class IDRNetwork(nn.Module):
 
             points_all = torch.cat([surface_points, eikonal_points], dim=0)
 
-            output = self.implicit_network(surface_points)
+            output = self.implicit_network(surface_points, latent_code)
             surface_sdf_values = output[:N, 0:1].detach()
 
-            g = self.implicit_network.gradient(points_all)
+            g = self.implicit_network.gradient(points_all, latent_code)
             surface_points_grad = g[:N, 0, :].clone().detach()
             grad_theta = g[N:, 0, :]
 
@@ -233,7 +259,7 @@ class IDRNetwork(nn.Module):
 
         rgb_values = torch.ones_like(points).float().cuda()
         if differentiable_surface_points.shape[0] > 0:
-            rgb_values[surface_mask] = self.get_rbg_value(differentiable_surface_points, view)
+            rgb_values[surface_mask] = self.get_rbg_value(differentiable_surface_points, view, latent_code)
 
         output = {
             'points': points,
@@ -246,12 +272,12 @@ class IDRNetwork(nn.Module):
 
         return output
 
-    def get_rbg_value(self, points, view_dirs):
-        output = self.implicit_network(points)
-        g = self.implicit_network.gradient(points)
+    def get_rbg_value(self, points, view_dirs, latent_code):
+        output = self.implicit_network(points, latent_code)
+        g = self.implicit_network.gradient(points, latent_code)
         normals = g[:, 0, :]
 
         feature_vectors = output[:, 1:]
-        rgb_vals = self.rendering_network(points, normals, view_dirs, feature_vectors)
+        rgb_vals = self.rendering_network(points, normals, view_dirs, feature_vectors, latent_code)
 
         return rgb_vals

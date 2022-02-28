@@ -1,14 +1,16 @@
+import math
 import os
+import random
 from datetime import datetime
 from pyhocon import ConfigFactory
 import sys
 import torch
-
+import pickle
 import utils.general as utils
 import utils.plots as plt
 
 
-class IDRTrainRunner():
+class IDRTrainRunner:
     def __init__(self, **kwargs):
         torch.set_default_dtype(torch.float32)
         torch.set_num_threads(1)
@@ -87,8 +89,15 @@ class IDRTrainRunner():
                                                                                           **dataset_conf)
         self.n_objs = self.train_dataset.n_objs
 
-        self.latent_vectors = [torch.rand((self.conf.get_int('model.latent_vector_size')), requires_grad=True) for _ in
-                               range(self.n_objs)]
+
+        lat_size = self.conf.get_int('model.latent_vector_size')
+
+        self.lat_vecs = torch.nn.Embedding(self.n_objs, lat_size)
+        torch.nn.init.normal_(
+            self.lat_vecs.weight.data,
+            0.0,
+            1 / math.sqrt(lat_size),
+        )
 
         print('Finish loading data ...')
 
@@ -110,7 +119,20 @@ class IDRTrainRunner():
         self.loss = utils.get_class(self.conf.get_string('train.loss_class'))(**self.conf.get_config('loss'))
 
         self.lr = self.conf.get_float('train.learning_rate')
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
+        self.optimizer = torch.optim.Adam(
+            [
+                {
+                    "params": self.model.parameters(),
+                    "lr": self.lr
+                },
+                {
+                    "params": self.lat_vecs.parameters(),
+                    "lr": self.lr
+                },
+            ]
+        )
+
         self.sched_milestones = self.conf.get_list('train.sched_milestones', default=[])
         self.sched_factor = self.conf.get_float('train.sched_factor', default=0.0)
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, self.sched_milestones,
@@ -128,6 +150,10 @@ class IDRTrainRunner():
         self.start_epoch = 0
         if is_continue:
             old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
+
+            print("Continuing from", old_checkpnts_dir)
+            with open(os.path.join(old_checkpnts_dir, "latent_table.pickle"), 'rb') as handle:
+                self.lat_vecs = pickle.load(handle)
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -166,6 +192,9 @@ class IDRTrainRunner():
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
     def save_checkpoints(self, epoch):
+
+        with open(os.path.join(self.checkpoints_path, "latent_table.pickle"), 'wb') as handle:
+            pickle.dump(self.lat_vecs, handle)
         torch.save(
             {"epoch": epoch, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, str(epoch) + ".pth"))
@@ -207,15 +236,21 @@ class IDRTrainRunner():
 
         print("training...")
 
+        latent_vec_history = []
+
         for epoch in range(self.start_epoch, self.nepochs + 1):
+            latent_vec_history.append(self.lat_vecs)
+            with open(os.path.join(self.plots_dir, "latent_table.pickle"), 'wb') as handle:
+                pickle.dump(latent_vec_history, handle)
 
             if epoch in self.alpha_milestones:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
-            if epoch % 100 == 0:
+            if epoch % 5 == 0:
                 self.save_checkpoints(epoch)
 
             if epoch % self.plot_freq == 0:
+
                 self.model.eval()
                 if self.train_cameras:
                     self.pose_vecs.eval()
@@ -225,7 +260,7 @@ class IDRTrainRunner():
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
-                model_input["obj"] = self.latent_vectors[model_input["obj"]]
+                model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
 
                 if self.train_cameras:
                     pose_input = self.pose_vecs(indices.cuda())
@@ -255,7 +290,8 @@ class IDRTrainRunner():
                          self.plots_dir,
                          epoch,
                          self.img_res,
-                         **self.plot_conf
+                         lat_vec=model_input["obj"],
+                         **self.plot_conf,
                          )
 
                 self.model.train()
@@ -264,12 +300,16 @@ class IDRTrainRunner():
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
-            for data_index, (indices, model_input, ground_truth) in enumerate(self.train_dataloader):
+            datapoints = list(self.train_dataloader)
+            random.shuffle(datapoints)
+
+
+            for data_index, (indices, model_input, ground_truth) in enumerate(datapoints):
 
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
-                model_input["obj"] = self.latent_vectors[model_input["obj"]]
+                model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
 
                 if self.train_cameras:
                     pose_input = self.pose_vecs(indices.cuda())
@@ -292,13 +332,13 @@ class IDRTrainRunner():
                 if self.train_cameras:
                     self.optimizer_cam.step()
 
-                print(
-                    '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, alpha = {8}, lr = {9}'
-                        .format(self.expname, epoch, data_index, self.n_batches, loss.item(),
-                                loss_output['rgb_loss'].item(),
-                                loss_output['eikonal_loss'].item(),
-                                loss_output['mask_loss'].item(),
-                                self.loss.alpha,
-                                self.scheduler.get_lr()[0]))
-
+                if data_index % 50 == 0:
+                    print(
+                        '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, alpha = {8}, lr = {9}'
+                            .format(self.expname, epoch, data_index, self.n_batches, loss.item(),
+                                    loss_output['rgb_loss'].item(),
+                                    loss_output['eikonal_loss'].item(),
+                                    loss_output['mask_loss'].item(),
+                                    self.loss.alpha,
+                                    self.scheduler.get_lr()[0]))
             self.scheduler.step()

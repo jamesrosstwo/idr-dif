@@ -8,7 +8,7 @@ import trimesh
 from PIL import Image
 from utils import rend_util
 
-def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot_nimgs, max_depth, resolution):
+def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot_nimgs, max_depth, resolution, lat_vec):
     # arrange data to plot
     batch_size, num_samples, _ = rgb_gt.shape
 
@@ -32,10 +32,13 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
 
     data = []
 
+    def sdf_plot(x):
+        return model.implicit_network(x, lat_vec)[:, 0]
+
     # plot surface
     surface_traces = get_surface_trace(path=path,
                                        epoch=epoch,
-                                       sdf=lambda x: model.implicit_network(x)[:, 0],
+                                       sdf=sdf_plot,
                                        resolution=resolution
                                        )
     try:
@@ -52,7 +55,7 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
         sampling_idx = torch.randperm(p.shape[0])[:2048]
         p = p[sampling_idx, :]
 
-        val = model.implicit_network(p)
+        val = model.implicit_network(p, lat_vec)
         caption = ["sdf: {0} ".format(v[0].item()) for v in val]
 
         data.append(get_3D_scatter_trace(p, name='intersection_points_{0}'.format(i), caption=caption))
