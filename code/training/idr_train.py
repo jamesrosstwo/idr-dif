@@ -10,6 +10,9 @@ import utils.general as utils
 import utils.plots as plt
 import tqdm
 
+from model import dif_modules
+from model.hyper_net import HyperNetwork
+
 
 class IDRTrainRunner:
     def __init__(self, **kwargs):
@@ -90,7 +93,6 @@ class IDRTrainRunner:
                                                                                           **dataset_conf)
         self.n_objs = self.train_dataset.n_objs
 
-
         lat_size = self.conf.get_int('model.latent_vector_size')
 
         self.lat_vecs = torch.nn.Embedding(self.n_objs, lat_size)
@@ -113,7 +115,9 @@ class IDRTrainRunner:
                                                            collate_fn=self.train_dataset.collate_fn
                                                            )
 
-        self.model = utils.get_class(self.conf.get_string('train.model_class'))(conf=self.conf.get_config('model'))
+        self.model = utils.get_class(self.conf.get_string('train.model_class'))(
+            conf=self.conf.get_config('model'))
+
         if torch.cuda.is_available():
             self.model.cuda()
 
@@ -304,8 +308,8 @@ class IDRTrainRunner:
             datapoints = list(self.train_dataloader)
             random.shuffle(datapoints)
 
-
-            for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints), total=len(datapoints)):
+            for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
+                                                                              total=len(datapoints)):
 
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()

@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from model import dif_modules
+from model.hyper_net import HyperNetwork
 from utils import rend_util
 from model.embedder import *
 from model.ray_tracing import RayTracing
@@ -37,9 +39,6 @@ class ImplicitNetwork(nn.Module):
             self.embed_fn = embed_fn
             dims[0] = input_ch
 
-        dims[0] += latent_code_size
-
-
         self.num_layers = len(dims)
         self.skip_in = skip_in
 
@@ -74,11 +73,10 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, input, latent_code, compute_grad=False):
+    def forward(self, input, compute_grad=False):
         if self.embed_fn is not None:
             input = self.embed_fn(input)
 
-        input = add_latent(input, latent_code)
         x = input
 
         for l in range(0, self.num_layers - 1):
@@ -175,14 +173,27 @@ class IDRNetwork(nn.Module):
         super().__init__()
         self.feature_vector_size = conf.get_int('feature_vector_size')
 
+        latent_code_dim = conf.get_int('latent_vector_size')
         implicit_conf = conf.get_config('implicit_network')
-        implicit_conf["latent_code_size"] = conf.get_int('latent_vector_size')
+        implicit_conf["latent_code_size"] = latent_code_dim
 
         rendering_conf = conf.get_config('rendering_network')
-        rendering_conf["latent_vector_size"] = conf.get_int('latent_vector_size')
+        rendering_conf["latent_vector_size"] = latent_code_dim
 
         self.implicit_network = ImplicitNetwork(self.feature_vector_size, **implicit_conf)
         self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
+
+
+        deform_config = conf.get_config("deform_network")
+        hyper_config = conf.get_config("hyper_network")
+
+        # Deform-Net
+        self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
+
+        # Hyper-Net
+        self.hyper_net = HyperNetwork(hyper_in_features=latent_code_dim,
+                                      hypo_module=self.deform_net, **hyper_config)
+
         self.ray_tracer = RayTracing(**conf.get_config('ray_tracer'))
         self.sample_network = SampleNetwork()
         self.object_bounding_sphere = conf.get_float('ray_tracer.object_bounding_sphere')
@@ -199,11 +210,13 @@ class IDRNetwork(nn.Module):
         ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
 
         batch_size, num_pixels, _ = ray_dirs.shape
+        hypo_params = self.hyper_net(latent_code)
 
         self.implicit_network.eval()
         with torch.no_grad():
 
             def sdf_fn(x):
+                adj_x = self.deform_net(x, params=hypo_params)
                 return self.implicit_network(x, latent_code)[:, 0]
 
             points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
