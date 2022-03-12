@@ -19,9 +19,9 @@ class SceneCollectionDataset(torch.utils.data.Dataset):
                  cam_file=None
                  ):
 
-        self.instance_dir = os.path.join('..', 'data', data_dir, 'collection{0}'.format(collection_id))
-        assert os.path.exists(self.instance_dir), "Data directory is empty"
-        with open(os.path.join(self.instance_dir, "specs.json"), "r") as f:
+        self.instance_path = utils.ROOT_PATH / 'data' / data_dir / 'collection{0}'.format(collection_id)
+        assert self.instance_path.exists(), "Data directory is empty"
+        with open(str(self.instance_path / "specs.json"), "r") as f:
             _collection_specs = json.load(f)
         self.n_objs = _collection_specs["n_objs"]
 
@@ -41,11 +41,11 @@ class SceneCollectionDataset(torch.utils.data.Dataset):
         self.object_masks = []
 
         for i in range(self.n_objs):
-            scene_dir = os.path.join(self.instance_dir, "scan{0}".format(i))
+            scene_dir = self.instance_path / "scan{0}".format(i)
 
-            image_dir = '{0}/image'.format(scene_dir)
+            image_dir = str(scene_dir / 'image')
             image_paths = sorted(utils.glob_imgs(image_dir))
-            mask_dir = '{0}/mask'.format(scene_dir)
+            mask_dir = str(scene_dir / 'mask')
             mask_paths = sorted(utils.glob_imgs(mask_dir))
 
             n_imgs = len(image_paths)
@@ -154,7 +154,7 @@ class SceneCollectionDataset(torch.utils.data.Dataset):
 
     def get_pose_init(self):
         # get noisy initializations obtained with the linear method
-        cam_file = '{0}/cameras_linear_init.npz'.format(self.instance_dir)
+        cam_file = str(self.instance_path /'cameras_linear_init.npz')
         camera_dict = np.load(cam_file)
         scale_mats = [camera_dict['scale_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
         world_mats = [camera_dict['world_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]

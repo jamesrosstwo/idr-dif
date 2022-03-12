@@ -1,6 +1,12 @@
 import os
 from glob import glob
+from pathlib import Path
+
 import torch
+
+
+_root_dir = os.path.dirname(os.path.abspath(__file__))
+ROOT_PATH = Path(_root_dir).parent.parent
 
 def mkdir_ifnotexists(directory):
     if not os.path.exists(directory):
