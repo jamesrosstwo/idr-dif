@@ -216,8 +216,11 @@ class IDRNetwork(nn.Module):
         with torch.no_grad():
 
             def sdf_fn(x):
-                adj_x = self.deform_net(x, params=hypo_params)
-                return self.implicit_network(x, latent_code)[:, 0]
+                adj_x = self.deform_net(x, params=hypo_params)["model_out"]
+                deformed_x = adj_x[0, :, :3]
+                scalar_correction = adj_x[0, :, 3:].reshape(-1)
+                impl = self.implicit_network(deformed_x, latent_code)[:, 0]
+                return impl + scalar_correction
 
             points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
                                                                  cam_loc=cam_loc,

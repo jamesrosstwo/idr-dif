@@ -122,6 +122,7 @@ class IDRTrainRunner:
             self.model.cuda()
 
         self.loss = utils.get_class(self.conf.get_string('train.loss_class'))(**self.conf.get_config('loss'))
+        self.loss_hist = {"rgb": [], "eikonal": [], "mask": []}
 
         self.lr = self.conf.get_float('train.learning_rate')
 
@@ -159,6 +160,8 @@ class IDRTrainRunner:
             print("Continuing from", old_checkpnts_dir)
             with open(os.path.join(old_checkpnts_dir, "latent_table.pickle"), 'rb') as handle:
                 self.lat_vecs = pickle.load(handle)
+            with open(os.path.join(old_checkpnts_dir, "loss_hist.pickle"), 'rb') as handle:
+                self.loss_hist = pickle.load(handle)
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -247,6 +250,9 @@ class IDRTrainRunner:
             latent_vec_history.append(self.lat_vecs)
             with open(os.path.join(self.plots_dir, "latent_table.pickle"), 'wb') as handle:
                 pickle.dump(latent_vec_history, handle)
+            # Save loss history
+            with open(os.path.join(self.plots_dir, "loss_hist.pickle"), 'wb') as handle:
+                pickle.dump(self.loss_hist, handle)
 
             if epoch in self.alpha_milestones:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
@@ -255,7 +261,6 @@ class IDRTrainRunner:
                 self.save_checkpoints(epoch)
 
             if epoch % self.plot_freq == 0:
-
                 self.model.eval()
                 if self.train_cameras:
                     self.pose_vecs.eval()
@@ -337,6 +342,11 @@ class IDRTrainRunner:
                 if self.train_cameras:
                     self.optimizer_cam.step()
 
+                if data_index % 20 == 0:
+                    self.loss_hist["rgb"].append(loss_output['rgb_loss'].item())
+                    self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
+                    self.loss_hist["mask"].append(loss_output['mask_loss'].item())
+
                 if data_index % 50 == 0:
                     print(
                         '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, alpha = {8}, lr = {9}'
@@ -346,4 +356,6 @@ class IDRTrainRunner:
                                     loss_output['mask_loss'].item(),
                                     self.loss.alpha,
                                     self.scheduler.get_lr()[0]))
+
+
             self.scheduler.step()
