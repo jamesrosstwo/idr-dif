@@ -183,7 +183,6 @@ class IDRNetwork(nn.Module):
         self.implicit_network = ImplicitNetwork(self.feature_vector_size, **implicit_conf)
         self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
 
-
         deform_config = conf.get_config("deform_network")
         hyper_config = conf.get_config("hyper_network")
 
@@ -198,8 +197,7 @@ class IDRNetwork(nn.Module):
         self.sample_network = SampleNetwork()
         self.object_bounding_sphere = conf.get_float('ray_tracer.object_bounding_sphere')
 
-    def forward(self, input):
-
+    def get_points(self, input):
         # Parse model input
         intrinsics = input["intrinsics"]
         uv = input["uv"]
@@ -214,7 +212,6 @@ class IDRNetwork(nn.Module):
 
         self.implicit_network.eval()
         with torch.no_grad():
-
             def sdf_fn(x):
                 adj_x = self.deform_net(x, params=hypo_params)["model_out"]
                 deformed_x = adj_x[0, :, :3]
@@ -226,6 +223,35 @@ class IDRNetwork(nn.Module):
                                                                  cam_loc=cam_loc,
                                                                  object_mask=object_mask,
                                                                  ray_directions=ray_dirs)
+        return points, network_object_mask, dists
+
+    def forward(self, input):
+        # Parse model input
+        intrinsics = input["intrinsics"]
+        uv = input["uv"]
+        pose = input["pose"]
+        object_mask = input["object_mask"].reshape(-1)
+        latent_code = input["obj"]
+
+        ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
+
+        batch_size, num_pixels, _ = ray_dirs.shape
+        hypo_params = self.hyper_net(latent_code)
+
+        self.implicit_network.eval()
+        with torch.no_grad():
+            def sdf_fn(x):
+                adj_x = self.deform_net(x, params=hypo_params)["model_out"]
+                deformed_x = adj_x[0, :, :3]
+                scalar_correction = adj_x[0, :, 3:].reshape(-1)
+                impl = self.implicit_network(deformed_x, latent_code)[:, 0]
+                return impl + scalar_correction
+
+            points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
+                                                                 cam_loc=cam_loc,
+                                                                 object_mask=object_mask,
+                                                                 ray_directions=ray_dirs)
+
         self.implicit_network.train()
 
         points = (cam_loc.unsqueeze(1) + dists.reshape(batch_size, num_pixels, 1) * ray_dirs).reshape(-1, 3)

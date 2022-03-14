@@ -93,13 +93,13 @@ class IDRTrainRunner:
                                                                                           **dataset_conf)
         self.n_objs = self.train_dataset.n_objs
 
-        lat_size = self.conf.get_int('model.latent_vector_size')
+        self.lat_size = self.conf.get_int('model.latent_vector_size')
 
-        self.lat_vecs = torch.nn.Embedding(self.n_objs, lat_size)
+        self.lat_vecs = torch.nn.Embedding(self.n_objs, self.lat_size)
         torch.nn.init.normal_(
             self.lat_vecs.weight.data,
             0.0,
-            1 / math.sqrt(lat_size),
+            1 / math.sqrt(self.lat_size),
         )
 
         print('Finish loading data ...')
@@ -245,6 +245,7 @@ class IDRTrainRunner:
         print("training...")
 
         latent_vec_history = []
+        points_hist = []
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
             latent_vec_history.append(self.lat_vecs)
@@ -261,52 +262,53 @@ class IDRTrainRunner:
                 self.save_checkpoints(epoch)
 
             if epoch % self.plot_freq == 0:
-                self.model.eval()
-                if self.train_cameras:
-                    self.pose_vecs.eval()
-                self.train_dataset.change_sampling_idx(-1)
-                indices, model_input, ground_truth = next(iter(self.plot_dataloader))
+                for i in range(10):
+                    self.model.eval()
+                    if self.train_cameras:
+                        self.pose_vecs.eval()
+                    self.train_dataset.change_sampling_idx(-1)
+                    indices, model_input, ground_truth = next(iter(self.plot_dataloader))
 
-                model_input["intrinsics"] = model_input["intrinsics"].cuda()
-                model_input["uv"] = model_input["uv"].cuda()
-                model_input["object_mask"] = model_input["object_mask"].cuda()
-                model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
+                    model_input["intrinsics"] = model_input["intrinsics"].cuda()
+                    model_input["uv"] = model_input["uv"].cuda()
+                    model_input["object_mask"] = model_input["object_mask"].cuda()
+                    model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
 
-                if self.train_cameras:
-                    pose_input = self.pose_vecs(indices.cuda())
-                    model_input['pose'] = pose_input
-                else:
-                    model_input['pose'] = model_input['pose'].cuda()
+                    if self.train_cameras:
+                        pose_input = self.pose_vecs(indices.cuda())
+                        model_input['pose'] = pose_input
+                    else:
+                        model_input['pose'] = model_input['pose'].cuda()
 
-                split = utils.split_input(model_input, self.total_pixels)
-                res = []
-                for s in split:
-                    out = self.model(s)
-                    res.append({
-                        'points': out['points'].detach(),
-                        'rgb_values': out['rgb_values'].detach(),
-                        'network_object_mask': out['network_object_mask'].detach(),
-                        'object_mask': out['object_mask'].detach()
-                    })
+                    split = utils.split_input(model_input, self.total_pixels)
+                    res = []
+                    for s in split:
+                        out = self.model(s)
+                        res.append({
+                            'points': out['points'].detach(),
+                            'rgb_values': out['rgb_values'].detach(),
+                            'network_object_mask': out['network_object_mask'].detach(),
+                            'object_mask': out['object_mask'].detach()
+                        })
 
-                batch_size = ground_truth['rgb'].shape[0]
-                model_outputs = utils.merge_output(res, self.total_pixels, batch_size)
+                    batch_size = ground_truth['rgb'].shape[0]
+                    model_outputs = utils.merge_output(res, self.total_pixels, batch_size)
 
-                plt.plot(self.model,
-                         indices,
-                         model_outputs,
-                         model_input['pose'],
-                         ground_truth['rgb'],
-                         self.plots_dir,
-                         epoch,
-                         self.img_res,
-                         lat_vec=model_input["obj"],
-                         **self.plot_conf,
-                         )
+                    plt.plot(self.model,
+                             indices,
+                             model_outputs,
+                             model_input['pose'],
+                             ground_truth['rgb'],
+                             self.plots_dir,
+                             epoch * 1000 + i,
+                             self.img_res,
+                             lat_vec=model_input["obj"],
+                             **self.plot_conf,
+                             )
 
-                self.model.train()
-                if self.train_cameras:
-                    self.pose_vecs.train()
+                    self.model.train()
+                    if self.train_cameras:
+                        self.pose_vecs.train()
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
@@ -346,6 +348,18 @@ class IDRTrainRunner:
                     self.loss_hist["rgb"].append(loss_output['rgb_loss'].item())
                     self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
                     self.loss_hist["mask"].append(loss_output['mask_loss'].item())
+
+
+                if data_index % 500 == 0:
+                    for i in range(self.lat_size ** 2):
+                        latent_code = torch.rand(self.lat_size).cuda()
+                        model_input["obj"] = latent_code
+                        points, _, _ = self.model.get_points(model_input)
+                        points_hist.append((latent_code, points))
+                    with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
+                        pickle.dump(points_hist, handle)
+
+
 
                 if data_index % 50 == 0:
                     print(
