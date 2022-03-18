@@ -2,9 +2,13 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from model.implicit_differentiable_renderer import IDRNetwork
+
+
 class IDRLoss(nn.Module):
-    def __init__(self, eikonal_weight, mask_weight, alpha):
+    def __init__(self, model: IDRNetwork, eikonal_weight, mask_weight, alpha):
         super().__init__()
+        self.model = model
         self.eikonal_weight = eikonal_weight
         self.mask_weight = mask_weight
         self.alpha = alpha
@@ -41,7 +45,16 @@ class IDRLoss(nn.Module):
         object_mask = model_outputs['object_mask']
 
         rgb_loss = self.get_rgb_loss(model_outputs['rgb_values'], rgb_gt, network_object_mask, object_mask)
+
         mask_loss = self.get_mask_loss(model_outputs['sdf_output'], network_object_mask, object_mask)
+
+        deform_params = self.model.deform_net.parameters()
+        deform_reg_loss = 0
+        for p in deform_params:
+            deform_reg_loss += torch.linalg.norm(p)
+        deform_reg_loss *= self.model.deform_reg_strength
+        print("\nDeform regularization loss: {0}".format(deform_reg_loss))
+        mask_loss += deform_reg_loss
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])
 
         loss = rgb_loss + \

@@ -12,6 +12,7 @@ import tqdm
 
 from model import dif_modules
 from model.hyper_net import HyperNetwork
+from model.loss import IDRLoss
 
 
 class IDRTrainRunner:
@@ -121,7 +122,7 @@ class IDRTrainRunner:
         if torch.cuda.is_available():
             self.model.cuda()
 
-        self.loss = utils.get_class(self.conf.get_string('train.loss_class'))(**self.conf.get_config('loss'))
+        self.loss = IDRLoss(self.model, **self.conf.get_config('loss'))
         self.loss_hist = {"rgb": [], "eikonal": [], "mask": []}
 
         self.lr = self.conf.get_float('train.learning_rate')
