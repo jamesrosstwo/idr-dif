@@ -128,13 +128,16 @@ def get_surface_trace(path, epoch, sdf, resolution=100, return_mesh=False):
 
         z = z.astype(np.float32)
 
-        verts, faces, normals, values = measure.marching_cubes_lewiner(
-            volume=z.reshape(grid['xyz'][1].shape[0], grid['xyz'][0].shape[0],
-                             grid['xyz'][2].shape[0]).transpose([1, 0, 2]),
-            level=0,
-            spacing=(grid['xyz'][0][2] - grid['xyz'][0][1],
-                     grid['xyz'][0][2] - grid['xyz'][0][1],
-                     grid['xyz'][0][2] - grid['xyz'][0][1]))
+        try:
+            verts, faces, normals, values = measure.marching_cubes_lewiner(
+                volume=z.reshape(grid['xyz'][1].shape[0], grid['xyz'][0].shape[0],
+                                 grid['xyz'][2].shape[0]).transpose([1, 0, 2]),
+                level=0,
+                spacing=(grid['xyz'][0][2] - grid['xyz'][0][1],
+                         grid['xyz'][0][2] - grid['xyz'][0][1],
+                         grid['xyz'][0][2] - grid['xyz'][0][1]))
+        except RuntimeError:
+            return None
 
         verts = verts + np.array([grid['xyz'][0][0], grid['xyz'][1][0], grid['xyz'][2][0]])
 
