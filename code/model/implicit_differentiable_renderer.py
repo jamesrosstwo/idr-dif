@@ -188,11 +188,12 @@ class IDRNetwork(nn.Module):
 
         # Deform-Net
         self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
-        self.deform_reg_strength = 100
+        self.deform_reg_strength = 3
 
         # Hyper-Net
         self.hyper_net = HyperNetwork(hyper_in_features=latent_code_dim,
                                       hypo_module=self.deform_net, **hyper_config)
+        self.hyper_reg_strength = 3
 
         self.ray_tracer = RayTracing(**conf.get_config('ray_tracer'))
         self.sample_network = SampleNetwork()
@@ -218,7 +219,7 @@ class IDRNetwork(nn.Module):
                 deformed_x = x + adj_x[0, :, :3]
                 scalar_correction = adj_x[0, :, 3:].reshape(-1)
                 impl = self.implicit_network(deformed_x, latent_code)[:, 0]
-                return impl + scalar_correction
+                return impl #+ scalar_correction
 
             points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
                                                                  cam_loc=cam_loc,

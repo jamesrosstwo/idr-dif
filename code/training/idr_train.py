@@ -240,6 +240,55 @@ class IDRTrainRunner:
                 {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
+    def plot(self, epoch, n_plots=10):
+        self.model.eval()
+        if self.train_cameras:
+            self.pose_vecs.eval()
+        for i in range(n_plots):
+            self.train_dataset.change_sampling_idx(-1)
+            indices, model_input, ground_truth = next(iter(self.plot_dataloader))
+
+            model_input["intrinsics"] = model_input["intrinsics"].cuda()
+            model_input["uv"] = model_input["uv"].cuda()
+            model_input["object_mask"] = model_input["object_mask"].cuda()
+            model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
+
+            if self.train_cameras:
+                pose_input = self.pose_vecs(indices.cuda())
+                model_input['pose'] = pose_input
+            else:
+                model_input['pose'] = model_input['pose'].cuda()
+
+            split = utils.split_input(model_input, self.total_pixels)
+            res = []
+            for s in split:
+                out = self.model(s)
+                res.append({
+                    'points': out['points'].detach(),
+                    'rgb_values': out['rgb_values'].detach(),
+                    'network_object_mask': out['network_object_mask'].detach(),
+                    'object_mask': out['object_mask'].detach()
+                })
+
+            batch_size = ground_truth['rgb'].shape[0]
+            model_outputs = utils.merge_output(res, self.total_pixels, batch_size)
+
+            plt.plot(self.model,
+                     indices,
+                     model_outputs,
+                     model_input['pose'],
+                     ground_truth['rgb'],
+                     self.plots_dir,
+                     epoch * 1000 + i,
+                     self.img_res,
+                     lat_vec=model_input["obj"],
+                     **self.plot_conf,
+                     )
+
+        self.model.train()
+        if self.train_cameras:
+            self.pose_vecs.train()
+
     def run(self):
         print("initializing latent table...")
 
@@ -247,6 +296,7 @@ class IDRTrainRunner:
 
         latent_vec_history = []
         points_hist = []
+        plot_epoch = 0
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
             latent_vec_history.append(self.lat_vecs)
@@ -262,54 +312,8 @@ class IDRTrainRunner:
             if epoch % 5 == 0:
                 self.save_checkpoints(epoch)
 
-            if epoch % self.plot_freq == 0:
-                for i in range(10):
-                    self.model.eval()
-                    if self.train_cameras:
-                        self.pose_vecs.eval()
-                    self.train_dataset.change_sampling_idx(-1)
-                    indices, model_input, ground_truth = next(iter(self.plot_dataloader))
-
-                    model_input["intrinsics"] = model_input["intrinsics"].cuda()
-                    model_input["uv"] = model_input["uv"].cuda()
-                    model_input["object_mask"] = model_input["object_mask"].cuda()
-                    model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
-
-                    if self.train_cameras:
-                        pose_input = self.pose_vecs(indices.cuda())
-                        model_input['pose'] = pose_input
-                    else:
-                        model_input['pose'] = model_input['pose'].cuda()
-
-                    split = utils.split_input(model_input, self.total_pixels)
-                    res = []
-                    for s in split:
-                        out = self.model(s)
-                        res.append({
-                            'points': out['points'].detach(),
-                            'rgb_values': out['rgb_values'].detach(),
-                            'network_object_mask': out['network_object_mask'].detach(),
-                            'object_mask': out['object_mask'].detach()
-                        })
-
-                    batch_size = ground_truth['rgb'].shape[0]
-                    model_outputs = utils.merge_output(res, self.total_pixels, batch_size)
-
-                    plt.plot(self.model,
-                             indices,
-                             model_outputs,
-                             model_input['pose'],
-                             ground_truth['rgb'],
-                             self.plots_dir,
-                             epoch * 1000 + i,
-                             self.img_res,
-                             lat_vec=model_input["obj"],
-                             **self.plot_conf,
-                             )
-
-                    self.model.train()
-                    if self.train_cameras:
-                        self.pose_vecs.train()
+            # if epoch % self.plot_freq == 0:
+            #     self.plot(epoch)
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
@@ -350,6 +354,9 @@ class IDRTrainRunner:
                     self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
                     self.loss_hist["mask"].append(loss_output['mask_loss'].item())
 
+                if data_index % 5000 == 0:
+                    self.plot(plot_epoch)
+                    plot_epoch += 1
 
                 if data_index % 500 == 0:
                     for i in range(self.lat_size ** 2):
@@ -360,8 +367,6 @@ class IDRTrainRunner:
                     with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
                         pickle.dump(points_hist, handle)
 
-
-
                 if data_index % 50 == 0:
                     print(
                         '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, alpha = {8}, lr = {9}'
@@ -371,6 +376,5 @@ class IDRTrainRunner:
                                     loss_output['mask_loss'].item(),
                                     self.loss.alpha,
                                     self.scheduler.get_lr()[0]))
-
 
             self.scheduler.step()

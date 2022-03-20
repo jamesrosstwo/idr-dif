@@ -53,8 +53,16 @@ class IDRLoss(nn.Module):
         for p in deform_params:
             deform_reg_loss += torch.linalg.norm(p)
         deform_reg_loss *= self.model.deform_reg_strength
-        print("\nDeform regularization loss: {0}".format(deform_reg_loss))
-        mask_loss += deform_reg_loss
+
+        hyper_params = self.model.hyper_net.parameters()
+        hyper_reg_loss = 0
+        for p in hyper_params:
+            hyper_reg_loss += torch.linalg.norm(p)
+        hyper_reg_loss *= self.model.hyper_reg_strength
+        print("\nHyper regularization loss: {0}".format(hyper_reg_loss))
+        mask_loss += hyper_reg_loss
+
+
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])
 
         loss = rgb_loss + \

@@ -172,3 +172,13 @@ def last_layer_sine_init(m):
             num_input = m.weight.size(-1)
             nn.init.zeros_(m.weight)
             nn.init.zeros_(m.bias)
+
+
+def classify(x_1, x_2):
+    if x_2 > -0.5:
+        if x_1 < -0.5:
+            return "A"
+        else:
+            return "B"
+    else:
+        return "B"
