@@ -53,6 +53,7 @@ class IDRLoss(nn.Module):
         for p in deform_params:
             deform_reg_loss += torch.linalg.norm(p)
         deform_reg_loss *= self.model.deform_reg_strength
+        mask_loss += deform_reg_loss
 
         hyper_params = self.model.hyper_net.parameters()
         hyper_reg_loss = 0

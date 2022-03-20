@@ -204,6 +204,9 @@ class IDRTrainRunner:
 
         with open(os.path.join(self.checkpoints_path, "latent_table.pickle"), 'wb') as handle:
             pickle.dump(self.lat_vecs, handle)
+        # Save loss history
+        with open(os.path.join(self.checkpoints_path, "loss_hist.pickle"), 'wb') as handle:
+            pickle.dump(self.loss_hist, handle)
         torch.save(
             {"epoch": epoch, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, str(epoch) + ".pth"))
