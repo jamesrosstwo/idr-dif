@@ -219,7 +219,7 @@ class IDRNetwork(nn.Module):
                 deformed_x = x + adj_x[0, :, :3]
                 scalar_correction = adj_x[0, :, 3:].reshape(-1)
                 impl = self.implicit_network(deformed_x, latent_code)[:, 0]
-                return impl #+ scalar_correction
+                return impl + scalar_correction
 
             points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
                                                                  cam_loc=cam_loc,
