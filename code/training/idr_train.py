@@ -12,6 +12,7 @@ import tqdm
 
 from model import dif_modules
 from model.hyper_net import HyperNetwork
+from model.implicit_differentiable_renderer import IDRNetwork
 from model.loss import IDRLoss
 
 
@@ -116,7 +117,7 @@ class IDRTrainRunner:
                                                            collate_fn=self.train_dataset.collate_fn
                                                            )
 
-        self.model = utils.get_class(self.conf.get_string('train.model_class'))(
+        self.model = IDRNetwork(
             conf=self.conf.get_config('model'))
 
         if torch.cuda.is_available():
@@ -315,8 +316,8 @@ class IDRTrainRunner:
             if epoch % 5 == 0:
                 self.save_checkpoints(epoch)
 
-            # if epoch % self.plot_freq == 0:
-            #     self.plot(epoch)
+            if epoch % self.plot_freq == 0:
+                self.plot(epoch)
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
@@ -358,7 +359,7 @@ class IDRTrainRunner:
                     self.loss_hist["mask"].append(loss_output['mask_loss'].item())
 
                 if data_index % 5000 == 0:
-                    self.plot(plot_epoch)
+                    # self.plot(plot_epoch)
                     plot_epoch += 1
 
                 if data_index % 500 == 0:

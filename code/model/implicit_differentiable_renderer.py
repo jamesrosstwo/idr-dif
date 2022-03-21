@@ -170,6 +170,8 @@ class RenderingNetwork(nn.Module):
 
 class IDRNetwork(nn.Module):
     def __init__(self, conf):
+        self.mean_deform = torch.zeros(1).cuda()
+        self.mean_correction = torch.zeros(1).cuda()
         super().__init__()
         self.feature_vector_size = conf.get_int('feature_vector_size')
 
@@ -199,13 +201,28 @@ class IDRNetwork(nn.Module):
         self.sample_network = SampleNetwork()
         self.object_bounding_sphere = conf.get_float('ray_tracer.object_bounding_sphere')
 
-    def get_points(self, input):
+    def sdf_fn(self, x, hypo_params, latent_code):
+        adj_x = self.deform_net(x, params=hypo_params)["model_out"]
+
+        x_deform = adj_x[0, :, :3]
+        scalar_correction = adj_x[0, :, 3:].reshape(-1)
+
+        mean_deform = torch.mean(torch.linalg.norm(x_deform, dim=1)).reshape(1)
+        mean_correction = torch.mean(torch.abs(scalar_correction)).reshape(1)
+
+        self.mean_deform = torch.cat((self.mean_deform, mean_deform))
+        self.mean_correction = torch.cat((self.mean_correction, mean_correction))
+
+        impl = self.implicit_network(x + x_deform, latent_code)[:, 0]
+        return impl + scalar_correction
+
+    def get_points(self, pt_in):
         # Parse model input
-        intrinsics = input["intrinsics"]
-        uv = input["uv"]
-        pose = input["pose"]
-        object_mask = input["object_mask"].reshape(-1)
-        latent_code = input["obj"]
+        intrinsics = pt_in["intrinsics"]
+        uv = pt_in["uv"]
+        pose = pt_in["pose"]
+        object_mask = pt_in["object_mask"].reshape(-1)
+        latent_code = pt_in["obj"]
 
         ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
 
@@ -214,14 +231,7 @@ class IDRNetwork(nn.Module):
 
         self.implicit_network.eval()
         with torch.no_grad():
-            def sdf_fn(x):
-                adj_x = self.deform_net(x, params=hypo_params)["model_out"]
-                deformed_x = x + adj_x[0, :, :3]
-                scalar_correction = adj_x[0, :, 3:].reshape(-1)
-                impl = self.implicit_network(deformed_x, latent_code)[:, 0]
-                return impl + scalar_correction
-
-            points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
+            points, network_object_mask, dists = self.ray_tracer(sdf=lambda x: self.sdf_fn(x, hypo_params, latent_code),
                                                                  cam_loc=cam_loc,
                                                                  object_mask=object_mask,
                                                                  ray_directions=ray_dirs)
@@ -242,14 +252,8 @@ class IDRNetwork(nn.Module):
 
         self.implicit_network.eval()
         with torch.no_grad():
-            def sdf_fn(x):
-                adj_x = self.deform_net(x, params=hypo_params)["model_out"]
-                deformed_x = adj_x[0, :, :3]
-                scalar_correction = adj_x[0, :, 3:].reshape(-1)
-                impl = self.implicit_network(deformed_x, latent_code)[:, 0]
-                return impl + scalar_correction
 
-            points, network_object_mask, dists = self.ray_tracer(sdf=sdf_fn,
+            points, network_object_mask, dists = self.ray_tracer(sdf=lambda x: self.sdf_fn(x, hypo_params, latent_code),
                                                                  cam_loc=cam_loc,
                                                                  object_mask=object_mask,
                                                                  ray_directions=ray_dirs)
@@ -311,8 +315,12 @@ class IDRNetwork(nn.Module):
             'sdf_output': sdf_output,
             'network_object_mask': network_object_mask,
             'object_mask': object_mask,
-            'grad_theta': grad_theta
+            'grad_theta': grad_theta,
+            'mean_deform': torch.mean(self.mean_deform[1:]),
+            'mean_correction': torch.mean(self.mean_correction[1:])
         }
+        self.mean_deform = torch.zeros(1).cuda()
+        self.mean_correction = torch.zeros(1).cuda()
 
         return output
 
