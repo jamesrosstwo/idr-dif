@@ -126,7 +126,7 @@ class IDRTrainRunner:
             self.model.cuda()
 
         self.loss = IDRLoss(self.model, **self.conf.get_config('loss'))
-        self.loss_hist = {"rgb": [], "eikonal": [], "mask": []}
+        self.loss_hist = {"rgb": [], "eikonal": [], "mask": [], "deform": []}
 
         self.lr = self.conf.get_float('train.learning_rate')
 
@@ -340,7 +340,7 @@ class IDRTrainRunner:
                     model_input['pose'] = model_input['pose'].cuda()
 
                 model_outputs = self.model(model_input)
-                loss_output = self.loss(model_outputs, ground_truth)
+                loss_output = self.loss(model_outputs, ground_truth, epoch)
 
                 loss = loss_output['loss']
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 import torch
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_4\\2022_03_24_21_48_08\\plots")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_4\\2022_03_24_23_07_02\\plots")
 
 import pickle
 
