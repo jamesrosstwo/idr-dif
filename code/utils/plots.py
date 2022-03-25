@@ -8,7 +8,9 @@ import trimesh
 from PIL import Image
 from utils import rend_util
 
-def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot_nimgs, max_depth, resolution, lat_vec):
+
+def plot(model, indices, model_outputs, pose, rgb_gt, path, epoch, img_res, plot_nimgs, max_depth, resolution, lat_vec,
+         hypo_params):
     # arrange data to plot
     batch_size, num_samples, _ = rgb_gt.shape
 
@@ -20,7 +22,7 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
     depth = torch.ones(batch_size * num_samples).cuda().float() * max_depth
     depth[network_object_mask] = rend_util.get_depth(points, pose).reshape(-1)[network_object_mask]
     depth = depth.reshape(batch_size, num_samples, 1)
-    network_object_mask = network_object_mask.reshape(batch_size,-1)
+    network_object_mask = network_object_mask.reshape(batch_size, -1)
 
     cam_loc, cam_dir = rend_util.get_camera_for_plot(pose)
 
@@ -33,7 +35,7 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
     data = []
 
     def sdf_plot(x):
-        return model.implicit_network(x, lat_vec)[:, 0]
+        return model.implicit_network(x, hypo_params, lat_vec)[:, 0]
 
     # plot surface
     surface_traces = get_surface_trace(path=path,
@@ -55,10 +57,10 @@ def plot(model, indices, model_outputs ,pose, rgb_gt, path, epoch, img_res, plot
         sampling_idx = torch.randperm(p.shape[0])[:2048]
         p = p[sampling_idx, :]
 
-        val = model.implicit_network(p, lat_vec)
+        val = model.implicit_network(p, hypo_params, lat_vec)
         caption = ["sdf: {0} ".format(v[0].item()) for v in val]
 
-        data.append(get_3D_scatter_trace(p, name='intersection_points_{0}'.format(i), caption=caption))
+        data.append(get_3D_scatter_trace(p.detach(), name='intersection_points_{0}'.format(i), caption=caption))
 
     fig = go.Figure(data=data)
     scene_dict = dict(xaxis=dict(range=[-3, 3], autorange=False),
@@ -155,6 +157,7 @@ def get_surface_trace(path, epoch, sdf, resolution=100, return_mesh=False):
         return traces
     return None
 
+
 def get_surface_high_res_mesh(sdf, resolution=100):
     # get low res mesh to sample point cloud
     grid = get_grid_uniform(100)
@@ -214,7 +217,6 @@ def get_surface_high_res_mesh(sdf, resolution=100):
 
     meshexport = None
     if (not (np.min(z) > 0 or np.max(z) < 0)):
-
         z = z.astype(np.float32)
 
         verts, faces, normals, values = measure.marching_cubes_lewiner(
@@ -227,7 +229,7 @@ def get_surface_high_res_mesh(sdf, resolution=100):
 
         verts = torch.from_numpy(verts).cuda().float()
         verts = torch.bmm(vecs.unsqueeze(0).repeat(verts.shape[0], 1, 1).transpose(1, 2),
-                   verts.unsqueeze(-1)).squeeze()
+                          verts.unsqueeze(-1)).squeeze()
         verts = (verts + grid_points[0]).cpu().numpy()
 
         meshexport = trimesh.Trimesh(verts, faces, normals)
@@ -247,6 +249,7 @@ def get_grid_uniform(resolution):
             "shortest_axis_length": 2.0,
             "xyz": [x, y, z],
             "shortest_axis_index": 0}
+
 
 def get_grid(points, resolution):
     eps = 0.2
@@ -281,6 +284,7 @@ def get_grid(points, resolution):
             "xyz": [x, y, z],
             "shortest_axis_index": shortest_axis}
 
+
 def plot_depth_maps(depth_maps, path, epoch, plot_nrow, img_res):
     depth_maps_plot = lin2img(depth_maps, img_res)
 
@@ -295,9 +299,10 @@ def plot_depth_maps(depth_maps, path, epoch, plot_nrow, img_res):
     img = Image.fromarray(tensor)
     img.save('{0}/depth_{1}.png'.format(path, epoch))
 
+
 def plot_images(rgb_points, ground_true, path, epoch, plot_nrow, img_res):
     ground_true = (ground_true.cuda() + 1.) / 2.
-    rgb_points = (rgb_points + 1. ) / 2.
+    rgb_points = (rgb_points + 1.) / 2.
 
     output_vs_gt = torch.cat((rgb_points, ground_true), dim=0)
     output_vs_gt_plot = lin2img(output_vs_gt, img_res)
@@ -313,6 +318,7 @@ def plot_images(rgb_points, ground_true, path, epoch, plot_nrow, img_res):
 
     img = Image.fromarray(tensor)
     img.save('{0}/rendering_{1}.png'.format(path, epoch))
+
 
 def lin2img(tensor, img_res):
     batch_size, num_samples, channels = tensor.shape

@@ -19,6 +19,7 @@ class ImplicitNetwork(nn.Module):
     def __init__(
             self,
             feature_vector_size,
+            deform_net,
             latent_code_size,
             d_in,
             d_out,
@@ -27,9 +28,10 @@ class ImplicitNetwork(nn.Module):
             bias=1.0,
             skip_in=(),
             weight_norm=True,
-            multires=0
+            multires=0,
     ):
         super().__init__()
+        self.deform_net = deform_net
 
         dims = [d_in] + dims + [d_out + feature_vector_size]
 
@@ -73,28 +75,33 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, input, compute_grad=False):
-        if self.embed_fn is not None:
-            input = self.embed_fn(input)
+    def forward(self, x_in, hypo_params, latent_code):
+        assert hypo_params is not None
 
-        x = input
+        adj_x = self.deform_net(x_in, params=hypo_params)["model_out"]
+        x_deform = x_in + adj_x[0, :, :3]
+        if self.embed_fn is not None:
+            x_deform = self.embed_fn(x_deform)
+        x = x_deform
 
         for l in range(0, self.num_layers - 1):
             lin = getattr(self, "lin" + str(l))
 
             if l in self.skip_in:
-                x = torch.cat([x, input], 1) / np.sqrt(2)
+                x = torch.cat([x, x_deform], 1) / np.sqrt(2)
 
             x = lin(x)
 
             if l < self.num_layers - 2:
                 x = self.softplus(x)
 
+        scalar_correction = adj_x[0, :, 3:]
+        x[:, :1] += scalar_correction
         return x
 
-    def gradient(self, x, latent_code):
+    def gradient(self, x, hypo_params, latent_code):
         x.requires_grad_(True)
-        y = self.forward(x, latent_code)[:, :1]
+        y = self.forward(x, hypo_params, latent_code)[:, :1]
         d_output = torch.ones_like(y, requires_grad=False, device=y.device)
         gradients = torch.autograd.grad(
             outputs=y,
@@ -170,8 +177,6 @@ class RenderingNetwork(nn.Module):
 
 class IDRNetwork(nn.Module):
     def __init__(self, conf):
-        self.mean_deform = torch.zeros(1).cuda()
-        self.mean_correction = torch.zeros(1).cuda()
         super().__init__()
         self.feature_vector_size = conf.get_int('feature_vector_size')
 
@@ -182,15 +187,15 @@ class IDRNetwork(nn.Module):
         rendering_conf = conf.get_config('rendering_network')
         rendering_conf["latent_vector_size"] = latent_code_dim
 
-        self.implicit_network = ImplicitNetwork(self.feature_vector_size, **implicit_conf)
-        self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
-
-        deform_config = conf.get_config("deform_network")
-        hyper_config = conf.get_config("hyper_network")
-
         # Deform-Net
+        deform_config = conf.get_config("deform_network")
         self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
         self.deform_reg_strength = 3
+
+        self.implicit_network = ImplicitNetwork(self.feature_vector_size, self.deform_net, **implicit_conf)
+        self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
+
+        hyper_config = conf.get_config("hyper_network")
 
         # Hyper-Net
         self.hyper_net = HyperNetwork(hyper_in_features=latent_code_dim,
@@ -200,42 +205,6 @@ class IDRNetwork(nn.Module):
         self.ray_tracer = RayTracing(**conf.get_config('ray_tracer'))
         self.sample_network = SampleNetwork()
         self.object_bounding_sphere = conf.get_float('ray_tracer.object_bounding_sphere')
-
-    def sdf_fn(self, x, hypo_params, latent_code):
-        adj_x = self.deform_net(x, params=hypo_params)["model_out"]
-
-        x_deform = adj_x[0, :, :3]
-        scalar_correction = adj_x[0, :, 3:].reshape(-1)
-
-        mean_deform = torch.mean(torch.linalg.norm(x_deform, dim=1)).reshape(1)
-        mean_correction = torch.mean(torch.abs(scalar_correction)).reshape(1)
-
-        self.mean_deform = torch.cat((self.mean_deform, mean_deform))
-        self.mean_correction = torch.cat((self.mean_correction, mean_correction))
-
-        impl = self.implicit_network(x + x_deform, latent_code)[:, 0]
-        return impl + scalar_correction
-
-    def get_points(self, pt_in):
-        # Parse model input
-        intrinsics = pt_in["intrinsics"]
-        uv = pt_in["uv"]
-        pose = pt_in["pose"]
-        object_mask = pt_in["object_mask"].reshape(-1)
-        latent_code = pt_in["obj"]
-
-        ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
-
-        batch_size, num_pixels, _ = ray_dirs.shape
-        hypo_params = self.hyper_net(latent_code)
-
-        self.implicit_network.eval()
-        with torch.no_grad():
-            points, network_object_mask, dists = self.ray_tracer(sdf=lambda x: self.sdf_fn(x, hypo_params, latent_code),
-                                                                 cam_loc=cam_loc,
-                                                                 object_mask=object_mask,
-                                                                 ray_directions=ray_dirs)
-        return points, network_object_mask, dists
 
     def forward(self, input):
         # Parse model input
@@ -248,21 +217,22 @@ class IDRNetwork(nn.Module):
         ray_dirs, cam_loc = rend_util.get_camera_params(uv, pose, intrinsics)
 
         batch_size, num_pixels, _ = ray_dirs.shape
+
         hypo_params = self.hyper_net(latent_code)
 
         self.implicit_network.eval()
         with torch.no_grad():
-
-            points, network_object_mask, dists = self.ray_tracer(sdf=lambda x: self.sdf_fn(x, hypo_params, latent_code),
-                                                                 cam_loc=cam_loc,
-                                                                 object_mask=object_mask,
-                                                                 ray_directions=ray_dirs)
+            points, network_object_mask, dists = self.ray_tracer(
+                sdf=lambda x: self.implicit_network(x, hypo_params, latent_code)[:, 0],
+                cam_loc=cam_loc,
+                object_mask=object_mask,
+                ray_directions=ray_dirs)
 
         self.implicit_network.train()
 
         points = (cam_loc.unsqueeze(1) + dists.reshape(batch_size, num_pixels, 1) * ray_dirs).reshape(-1, 3)
 
-        sdf_output = self.implicit_network(points, latent_code)[:, 0:1]
+        sdf_output = self.implicit_network(points, hypo_params, latent_code)[:, 0:1]
         ray_dirs = ray_dirs.reshape(-1, 3)
 
         if self.training:
@@ -284,10 +254,10 @@ class IDRNetwork(nn.Module):
 
             points_all = torch.cat([surface_points, eikonal_points], dim=0)
 
-            output = self.implicit_network(surface_points, latent_code)
+            output = self.implicit_network(surface_points, hypo_params, latent_code)
             surface_sdf_values = output[:N, 0:1].detach()
 
-            g = self.implicit_network.gradient(points_all, latent_code)
+            g = self.implicit_network.gradient(points_all, hypo_params, latent_code)
             surface_points_grad = g[:N, 0, :].clone().detach()
             grad_theta = g[N:, 0, :]
 
@@ -316,17 +286,17 @@ class IDRNetwork(nn.Module):
             'network_object_mask': network_object_mask,
             'object_mask': object_mask,
             'grad_theta': grad_theta,
-            'mean_deform': torch.mean(self.mean_deform[1:]),
-            'mean_correction': torch.mean(self.mean_correction[1:])
+            # 'mean_deform': torch.mean(mean_deform),
+            # 'mean_correction': torch.mean(mean_correction)
         }
-        self.mean_deform = torch.zeros(1).cuda()
-        self.mean_correction = torch.zeros(1).cuda()
 
         return output
 
     def get_rbg_value(self, points, view_dirs, latent_code):
-        output = self.implicit_network(points, latent_code)
-        g = self.implicit_network.gradient(points, latent_code)
+
+        hypo_params = self.hyper_net(latent_code)
+        output = self.implicit_network(points, hypo_params, latent_code)
+        g = self.implicit_network.gradient(points, hypo_params, latent_code)
         normals = g[:, 0, :]
 
         feature_vectors = output[:, 1:]

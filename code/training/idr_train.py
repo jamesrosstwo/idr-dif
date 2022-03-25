@@ -9,11 +9,13 @@ import pickle
 import utils.general as utils
 import utils.plots as plt
 import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from model import dif_modules
 from model.hyper_net import HyperNetwork
 from model.implicit_differentiable_renderer import IDRNetwork
 from model.loss import IDRLoss
+from utils.debug import plot_grad_flow
 
 
 class IDRTrainRunner:
@@ -202,9 +204,6 @@ class IDRTrainRunner:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
     def save_checkpoints(self, epoch):
-
-        with open(os.path.join(self.checkpoints_path, "latent_table.pickle"), 'wb') as handle:
-            pickle.dump(self.lat_vecs, handle)
         # Save loss history
         with open(os.path.join(self.checkpoints_path, "loss_hist.pickle"), 'wb') as handle:
             pickle.dump(self.loss_hist, handle)
@@ -286,6 +285,7 @@ class IDRTrainRunner:
                      epoch * 1000 + i,
                      self.img_res,
                      lat_vec=model_input["obj"],
+                     hypo_params=self.model.hyper_net(model_input["obj"]),
                      **self.plot_conf,
                      )
 
@@ -303,7 +303,7 @@ class IDRTrainRunner:
         plot_epoch = 0
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
-            latent_vec_history.append(self.lat_vecs)
+            latent_vec_history.append(torch.clone(self.lat_vecs.weight))
             with open(os.path.join(self.plots_dir, "latent_table.pickle"), 'wb') as handle:
                 pickle.dump(latent_vec_history, handle)
             # Save loss history
@@ -316,13 +316,13 @@ class IDRTrainRunner:
             if epoch % 5 == 0:
                 self.save_checkpoints(epoch)
 
-            if epoch % self.plot_freq == 0:
-                self.plot(epoch)
-
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
             datapoints = list(self.train_dataloader)
             random.shuffle(datapoints)
+
+            if epoch % self.plot_freq == 0:
+                self.plot(epoch)
 
             for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
                                                                               total=len(datapoints)):
@@ -349,6 +349,8 @@ class IDRTrainRunner:
 
                 loss.backward()
 
+                # plot_grad_flow(self.model.named_parameters())
+
                 self.optimizer.step()
                 if self.train_cameras:
                     self.optimizer_cam.step()
@@ -362,14 +364,14 @@ class IDRTrainRunner:
                     # self.plot(plot_epoch)
                     plot_epoch += 1
 
-                if data_index % 500 == 0:
-                    for i in range(self.lat_size ** 2):
-                        latent_code = torch.rand(self.lat_size).cuda()
-                        model_input["obj"] = latent_code
-                        points, _, _ = self.model.get_points(model_input)
-                        points_hist.append((latent_code, points))
-                    with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
-                        pickle.dump(points_hist, handle)
+                # if data_index % 500 == 0:
+                #     for i in range(self.lat_size ** 2):
+                #         latent_code = torch.rand(self.lat_size).cuda()
+                #         model_input["obj"] = latent_code
+                #         points, _, _ = self.model.get_points(model_input)
+                #         points_hist.append((latent_code, points))
+                #     with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
+                #         pickle.dump(points_hist, handle)
 
                 if data_index % 50 == 0:
                     print(
