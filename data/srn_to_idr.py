@@ -131,5 +131,6 @@ def converted_srn_collection(in_path: Path, out_path: Path, n_views=250, n_objs=
 
 if __name__ == "__main__":
     in_path = Path("cars_train")
-    out_path = Path("idr/collection2")
-    converted_srn_collection(in_path, out_path, overwrite=True, img_sz=128, n_objs=2)
+    n_objs = 3
+    out_path = Path("idr/collection{0}".format(n_objs))
+    converted_srn_collection(in_path, out_path, overwrite=True, img_sz=128, n_objs=n_objs)
