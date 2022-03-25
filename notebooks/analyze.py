@@ -1,7 +1,7 @@
 from pathlib import Path
 import torch
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_7\\2022_03_14_03_53_15\\plots")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_4\\2022_03_24_21_48_08\\plots")
 
 import pickle
 
@@ -31,9 +31,9 @@ fig = px.line(loss_hist_df, x="idx", y="loss", color="type", log_y=True)
 fig.write_html("loss_hist.html")
 
 
-exp_path2 = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_7\\2022_03_21_12_32_49\\plots")
-with open(str(exp_path2 / "latent_table.pickle"), "rb") as handle:
-    latent_table = pickle.load(handle)
+# exp_path2 = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_7\\2022_03_21_12_32_49\\plots")
+# with open(str(exp_path2 / "latent_table.pickle"), "rb") as handle:
+#     latent_table = pickle.load(handle)
 
 
 data = []

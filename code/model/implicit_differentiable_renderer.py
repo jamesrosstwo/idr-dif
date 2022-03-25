@@ -75,7 +75,7 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, x_in, hypo_params, latent_code):
+    def forward(self, x_in, hypo_params, latent_code, ret_deforms=False):
         assert hypo_params is not None
 
         adj_x = self.deform_net(x_in, params=hypo_params)["model_out"]
@@ -97,6 +97,8 @@ class ImplicitNetwork(nn.Module):
 
         scalar_correction = adj_x[0, :, 3:]
         x[:, :1] += scalar_correction
+        if ret_deforms:
+            return x, adj_x[0, :, :3], scalar_correction
         return x
 
     def gradient(self, x, hypo_params, latent_code):
@@ -232,7 +234,9 @@ class IDRNetwork(nn.Module):
 
         points = (cam_loc.unsqueeze(1) + dists.reshape(batch_size, num_pixels, 1) * ray_dirs).reshape(-1, 3)
 
-        sdf_output = self.implicit_network(points, hypo_params, latent_code)[:, 0:1]
+        sdf_output, deformations, scalar_correction = \
+            self.implicit_network.forward(points, hypo_params, latent_code, ret_deforms=True)
+        sdf_output = sdf_output[:, 0:1]
         ray_dirs = ray_dirs.reshape(-1, 3)
 
         if self.training:
@@ -286,8 +290,8 @@ class IDRNetwork(nn.Module):
             'network_object_mask': network_object_mask,
             'object_mask': object_mask,
             'grad_theta': grad_theta,
-            # 'mean_deform': torch.mean(mean_deform),
-            # 'mean_correction': torch.mean(mean_correction)
+            'deformation': deformations,
+            'correction': scalar_correction
         }
 
         return output

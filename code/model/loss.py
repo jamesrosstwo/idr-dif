@@ -14,7 +14,7 @@ class IDRLoss(nn.Module):
         self.alpha = alpha
         self.l1_loss = nn.L1Loss(reduction='sum')
 
-    def get_rgb_loss(self,rgb_values, rgb_gt, network_object_mask, object_mask):
+    def get_rgb_loss(self, rgb_values, rgb_gt, network_object_mask, object_mask):
         if (network_object_mask & object_mask).sum() == 0:
             return torch.tensor(0.0).cuda().float()
 
@@ -36,7 +36,8 @@ class IDRLoss(nn.Module):
             return torch.tensor(0.0).cuda().float()
         sdf_pred = -self.alpha * sdf_output[mask]
         gt = object_mask[mask].float()
-        mask_loss = (1 / self.alpha) * F.binary_cross_entropy_with_logits(sdf_pred.squeeze(), gt, reduction='sum') / float(object_mask.shape[0])
+        mask_loss = (1 / self.alpha) * F.binary_cross_entropy_with_logits(sdf_pred.squeeze(), gt,
+                                                                          reduction='sum') / float(object_mask.shape[0])
         return mask_loss
 
     def forward(self, model_outputs, ground_truth):
@@ -47,6 +48,11 @@ class IDRLoss(nn.Module):
         rgb_loss = self.get_rgb_loss(model_outputs['rgb_values'], rgb_gt, network_object_mask, object_mask)
 
         mask_loss = self.get_mask_loss(model_outputs['sdf_output'], network_object_mask, object_mask)
+
+        # Regularization of the deformations
+        deformation_magnitude = torch.linalg.norm(model_outputs["deformation"], dim=1).mean()
+        correction_magnitude = torch.abs(model_outputs["correction"]).mean()
+        mask_loss += (deformation_magnitude + correction_magnitude) * 50
 
         # deform_params = self.model.deform_net.parameters()
         # deform_reg_loss = sum([torch.linalg.norm(p) for p in deform_params]) * self.model.deform_reg_strength
