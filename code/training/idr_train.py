@@ -127,6 +127,7 @@ class IDRTrainRunner:
 
         self.loss = IDRLoss(self.model, **self.conf.get_config('loss'))
         self.loss_hist = {"rgb": [], "eikonal": [], "mask": [], "deform": []}
+        self.optimization_steps = 0
 
         self.lr = self.conf.get_float('train.learning_rate')
 
@@ -322,11 +323,9 @@ class IDRTrainRunner:
             datapoints = list(self.train_dataloader)
             random.shuffle(datapoints)
 
-            if epoch % self.plot_freq == 0:
-                self.plot(epoch)
-
             for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
                                                                               total=len(datapoints)):
+                self.optimization_steps += 1
 
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
@@ -340,7 +339,7 @@ class IDRTrainRunner:
                     model_input['pose'] = model_input['pose'].cuda()
 
                 model_outputs = self.model(model_input)
-                loss_output = self.loss(model_outputs, ground_truth, epoch)
+                loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
 
                 loss = loss_output['loss']
 
@@ -356,13 +355,13 @@ class IDRTrainRunner:
                 if self.train_cameras:
                     self.optimizer_cam.step()
 
-                if data_index % 20 == 0:
+                if self.optimization_steps % 20 == 0:
                     self.loss_hist["rgb"].append(loss_output['rgb_loss'].item())
                     self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
                     self.loss_hist["mask"].append(loss_output['mask_loss'].item())
 
-                if data_index % 5000 == 0:
-                    # self.plot(plot_epoch)
+                if self.optimization_steps % 5000 == 0:
+                    self.plot(plot_epoch)
                     plot_epoch += 1
 
                 # if data_index % 500 == 0:

@@ -42,7 +42,7 @@ class IDRLoss(nn.Module):
                                                                           reduction='sum') / float(object_mask.shape[0])
         return mask_loss
 
-    def forward(self, model_outputs, ground_truth, epoch):
+    def forward(self, model_outputs, ground_truth, opt_steps):
         rgb_gt = ground_truth['rgb'].cuda()
         network_object_mask = model_outputs['network_object_mask']
         object_mask = model_outputs['object_mask']
@@ -51,7 +51,7 @@ class IDRLoss(nn.Module):
 
         mask_loss = self.get_mask_loss(model_outputs['sdf_output'], network_object_mask, object_mask)
 
-        deform_reg_factor = max(100000 - (math.floor(epoch / 5) * 5000), 0)
+        deform_reg_factor = max(100000 - opt_steps, 0)
 
         # Regularization of the deformations
         deformation_magnitude = torch.linalg.norm(model_outputs["deformation"], dim=1).mean()
