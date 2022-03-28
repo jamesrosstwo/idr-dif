@@ -18,6 +18,7 @@ for i in range(len(loss_hist["rgb"])):
         (i, loss_hist["rgb"][i], "rgb"),
         (i, loss_hist["mask"][i], "mask"),
         (i, loss_hist["eikonal"][i], "eikonal"),
+        (i, loss_hist["deform"][i], "deform"),
     ]
 
 

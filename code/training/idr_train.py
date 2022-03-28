@@ -251,6 +251,7 @@ class IDRTrainRunner:
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
     def plot(self, epoch, n_plots=10):
+        torch.cuda.empty_cache()
         self.model.eval()
         if self.train_cameras:
             self.pose_vecs.eval()
@@ -300,6 +301,7 @@ class IDRTrainRunner:
         self.model.train()
         if self.train_cameras:
             self.pose_vecs.train()
+        torch.cuda.empty_cache()
 
     def run(self):
         print("initializing latent table...")
@@ -307,7 +309,6 @@ class IDRTrainRunner:
         print("training...")
 
         latent_vec_history = []
-        points_hist = []
         plot_epoch = 0
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
