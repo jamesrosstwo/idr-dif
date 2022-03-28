@@ -51,30 +51,19 @@ class IDRLoss(nn.Module):
 
         mask_loss = self.get_mask_loss(model_outputs['sdf_output'], network_object_mask, object_mask)
 
-        deform_reg_factor = max(100000 - opt_steps, 0)
+        deform_reg_factor = max(self.model.deform_reg_strength - opt_steps, 0)
 
         # Regularization of the deformations
         deformation_magnitude = torch.linalg.norm(model_outputs["deformation"], dim=1).mean()
         correction_magnitude = torch.abs(model_outputs["correction"]).mean()
-        deform_loss = (deformation_magnitude + correction_magnitude) * deform_reg_factor
-
-        # deform_params = self.model.deform_net.parameters()
-        # deform_reg_loss = sum([torch.linalg.norm(p) for p in deform_params]) * self.model.deform_reg_strength
-        # mask_loss += deform_reg_loss
-
-        # hyper_params = self.model.hyper_net.parameters()
-        # hyper_reg_loss = sum([torch.linalg.norm(p) for p in hyper_params]) * self.model.hyper_reg_strength
-        # print("\nHyper regularization loss: {0}".format(hyper_reg_loss))
-        # mask_loss += hyper_reg_loss
-
-        # mask_loss += model_outputs["mean_deform"] * 400
-        # mask_loss += model_outputs["mean_correction"] * 4000
+        deform_loss = (deformation_magnitude + correction_magnitude)
 
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])
 
         loss = rgb_loss + \
                self.eikonal_weight * eikonal_loss + \
-               self.mask_weight * mask_loss
+               self.mask_weight * mask_loss + \
+               deform_reg_factor * deform_loss
 
         return {
             'loss': loss,

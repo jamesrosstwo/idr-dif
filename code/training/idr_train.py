@@ -163,10 +163,13 @@ class IDRTrainRunner:
             old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
 
             print("Continuing from", old_checkpnts_dir)
-            with open(os.path.join(old_checkpnts_dir, "latent_table.pickle"), 'rb') as handle:
-                self.lat_vecs = pickle.load(handle)
-            with open(os.path.join(old_checkpnts_dir, "loss_hist.pickle"), 'rb') as handle:
-                self.loss_hist = pickle.load(handle)
+            try:
+                with open(os.path.join(old_checkpnts_dir, "latent_table.pickle"), 'rb') as handle:
+                    self.lat_vecs = pickle.load(handle)
+                with open(os.path.join(old_checkpnts_dir, "loss_hist.pickle"), 'rb') as handle:
+                    self.loss_hist = pickle.load(handle)
+            except FileNotFoundError:
+                pass
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -196,6 +199,7 @@ class IDRTrainRunner:
         self.img_res = self.train_dataset.img_res
         self.n_batches = len(self.train_dataloader)
         self.plot_freq = self.conf.get_int('train.plot_freq')
+        self.checkpoint_freq = self.conf.get_int('train.checkpoint_freq')
         self.plot_conf = self.conf.get_config('plot')
 
         self.alpha_milestones = self.conf.get_list('train.alpha_milestones', default=[])
@@ -208,6 +212,8 @@ class IDRTrainRunner:
         # Save loss history
         with open(os.path.join(self.checkpoints_path, "loss_hist.pickle"), 'wb') as handle:
             pickle.dump(self.loss_hist, handle)
+        with open(os.path.join(self.checkpoints_path, "latent_table.pickle"), 'wb') as handle:
+            pickle.dump(self.lat_vecs, handle)
         torch.save(
             {"epoch": epoch, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, str(epoch) + ".pth"))
@@ -315,8 +321,7 @@ class IDRTrainRunner:
             if epoch in self.alpha_milestones:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
-            if epoch % 5 == 0:
-                self.save_checkpoints(epoch)
+
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
@@ -349,20 +354,23 @@ class IDRTrainRunner:
 
                 loss.backward()
 
-                # plot_grad_flow(self.model.named_parameters())
 
                 self.optimizer.step()
                 if self.train_cameras:
                     self.optimizer_cam.step()
 
-                if self.optimization_steps % 20 == 0:
+                if self.optimization_steps % 50 == 0:
                     self.loss_hist["rgb"].append(loss_output['rgb_loss'].item())
                     self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
                     self.loss_hist["mask"].append(loss_output['mask_loss'].item())
+                    self.loss_hist["deform"].append(loss_output["deform_loss"].item())
 
-                if self.optimization_steps % 5000 == 0:
+                if self.optimization_steps % self.plot_freq == 0:
                     self.plot(plot_epoch)
                     plot_epoch += 1
+
+                if self.optimization_steps % self.checkpoint_freq == 0:
+                    self.save_checkpoints(epoch)
 
                 # if data_index % 500 == 0:
                 #     for i in range(self.lat_size ** 2):
@@ -375,11 +383,12 @@ class IDRTrainRunner:
 
                 if data_index % 50 == 0:
                     print(
-                        '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, alpha = {8}, lr = {9}'
+                        '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, deform_loss = {8}, alpha = {9}, lr = {10}'
                             .format(self.expname, epoch, data_index, self.n_batches, loss.item(),
                                     loss_output['rgb_loss'].item(),
                                     loss_output['eikonal_loss'].item(),
                                     loss_output['mask_loss'].item(),
+                                    loss_output["deform_loss"].item(),
                                     self.loss.alpha,
                                     self.scheduler.get_lr()[0]))
 
