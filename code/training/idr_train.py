@@ -250,7 +250,7 @@ class IDRTrainRunner:
                 {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
-    def plot(self, epoch, n_plots=10):
+    def plot(self, epoch, n_plots=3):
         torch.cuda.empty_cache()
         self.model.eval()
         if self.train_cameras:
