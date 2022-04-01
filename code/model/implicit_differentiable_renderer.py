@@ -75,11 +75,14 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, x_in, hypo_params, latent_code, ret_deforms=False):
+    def forward(self, x_in, hypo_params, latent_code, deform=True, ret_deforms=False):
         assert hypo_params is not None
 
-        adj_x = self.deform_net(x_in, params=hypo_params)["model_out"]
-        x_deform = x_in + adj_x[0, :, :3]
+        if deform or ret_deforms:
+            adj_x = self.deform_net(x_in, params=hypo_params)["model_out"]
+            x_deform = x_in + adj_x[0, :, :3]
+        else:
+            x_deform = x_in
         if self.embed_fn is not None:
             x_deform = self.embed_fn(x_deform)
         x = x_deform
@@ -95,15 +98,16 @@ class ImplicitNetwork(nn.Module):
             if l < self.num_layers - 2:
                 x = self.softplus(x)
 
-        scalar_correction = adj_x[0, :, 3:]
-        x[:, :1] += scalar_correction
-        if ret_deforms:
-            return x, adj_x[0, :, :3], scalar_correction
+        if deform or ret_deforms:
+            scalar_correction = adj_x[0, :, 3:]
+            x[:, :1] += scalar_correction
+            if ret_deforms:
+                return x, adj_x[0, :, :3], scalar_correction
         return x
 
-    def gradient(self, x, hypo_params, latent_code):
+    def gradient(self, x, hypo_params, latent_code, deform=True):
         x.requires_grad_(True)
-        y = self.forward(x, hypo_params, latent_code)[:, :1]
+        y = self.forward(x, hypo_params, latent_code, deform=deform)[:, :1]
         d_output = torch.ones_like(y, requires_grad=False, device=y.device)
         gradients = torch.autograd.grad(
             outputs=y,
@@ -263,7 +267,7 @@ class IDRNetwork(nn.Module):
 
             g = self.implicit_network.gradient(points_all, hypo_params, latent_code)
             surface_points_grad = g[:N, 0, :].clone().detach()
-            grad_theta = g[N:, 0, :]
+            grad_theta = self.implicit_network.gradient(points_all, hypo_params, latent_code, deform=False)[N:, 0, :]
 
             differentiable_surface_points = self.sample_network(surface_output,
                                                                 surface_sdf_values,

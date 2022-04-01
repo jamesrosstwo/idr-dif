@@ -212,7 +212,6 @@ class IDRTrainRunner:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
     def save_checkpoints(self, opt_steps):
-
         torch.save(
             {"epoch": opt_steps, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, str(opt_steps) + ".pth"))
