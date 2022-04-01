@@ -364,8 +364,7 @@ class IDRTrainRunner:
 
     def run(self):
         print("training...")
-        datapoints = list(self.train_dataloader)
-        self.num_datapoints = len(datapoints)
+
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
             lv = torch.clone(self.lat_vecs.weight)
@@ -376,6 +375,8 @@ class IDRTrainRunner:
 
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
+            datapoints = list(self.train_dataloader)
+            self.num_datapoints = len(datapoints)
             random.shuffle(datapoints)
 
             for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
