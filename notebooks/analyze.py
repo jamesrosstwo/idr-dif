@@ -1,7 +1,7 @@
 from pathlib import Path
 import torch
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_cc\\2022_03_27_18_07_40\\plots")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_03_28_08_59_59\\plots")
 
 import pickle
 
@@ -43,7 +43,7 @@ for table in latent_table:
         data.append((*[float(x) for x in row], "object{0}".format(i)))
 
 latent_df = pd.DataFrame(data, columns=[*[str("axis{0}".format(x)) for x in range(latent_table[0].shape[1])], "idx"])
-fig = px.line_3d(latent_df, x="axis0", y="axis1", z="axis2", color="idx", range_x=[-1, 1], range_y=[-1, 1], range_z=[-1, 1])
+fig = px.line_3d(latent_df, x="axis0", y="axis1", z="axis2", color="idx")#, range_x=[-1, 1], range_y=[-1, 1], range_z=[-1, 1])
 fig.write_html("latent.html")
 
 

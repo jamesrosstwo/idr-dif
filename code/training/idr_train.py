@@ -2,6 +2,9 @@ import math
 import os
 import random
 from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 from pyhocon import ConfigFactory
 import sys
 import torch
@@ -11,11 +14,9 @@ import utils.plots as plt
 import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from model import dif_modules
-from model.hyper_net import HyperNetwork
 from model.implicit_differentiable_renderer import IDRNetwork
 from model.loss import IDRLoss
-from utils.debug import plot_grad_flow
+from training.exp_storage import ExpStorage
 
 
 class IDRTrainRunner:
@@ -36,21 +37,23 @@ class IDRTrainRunner:
         if collection != -1:
             self.expname = self.expname + '_{0}'.format(collection)
 
+        self._is_continue = False
+
         if kwargs['is_continue'] and kwargs['timestamp'] == 'latest':
             if os.path.exists(os.path.join('../', kwargs['exps_folder_name'], self.expname)):
                 timestamps = os.listdir(os.path.join('../', kwargs['exps_folder_name'], self.expname))
                 if (len(timestamps)) == 0:
-                    is_continue = False
+                    self._is_continue = False
                     timestamp = None
                 else:
                     timestamp = sorted(timestamps)[-1]
-                    is_continue = True
+                    self._is_continue = True
             else:
-                is_continue = False
+                self._is_continue = False
                 timestamp = None
         else:
             timestamp = kwargs['timestamp']
-            is_continue = kwargs['is_continue']
+            self._is_continue = kwargs['is_continue']
 
         utils.mkdir_ifnotexists(os.path.join('../', self.exps_folder_name))
         self.expdir = os.path.join('../', self.exps_folder_name, self.expname)
@@ -71,6 +74,12 @@ class IDRTrainRunner:
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.model_params_subdir))
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.optimizer_params_subdir))
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.scheduler_params_subdir))
+
+        storage_path = Path(os.path.join(self.expdir, self.timestamp, "storage.pickle"))
+        if self._is_continue:
+            self.storage = ExpStorage.load(storage_path)
+        else:
+            self.storage = ExpStorage(storage_path)
 
         if self.train_cameras:
             self.optimizer_cam_params_subdir = "OptimizerCamParameters"
@@ -95,6 +104,7 @@ class IDRTrainRunner:
 
         self.train_dataset = utils.get_class(self.conf.get_string('train.dataset_class'))(self.train_cameras,
                                                                                           **dataset_conf)
+        self.num_datapoints = -1
         self.n_objs = self.train_dataset.n_objs
 
         self.lat_size = self.conf.get_int('model.latent_vector_size')
@@ -119,14 +129,12 @@ class IDRTrainRunner:
                                                            collate_fn=self.train_dataset.collate_fn
                                                            )
 
-        self.model = IDRNetwork(
-            conf=self.conf.get_config('model'))
+        self.model = IDRNetwork(conf=self.conf.get_config('model'))
 
         if torch.cuda.is_available():
             self.model.cuda()
 
         self.loss = IDRLoss(self.model, **self.conf.get_config('loss'))
-        self.loss_hist = {"rgb": [], "eikonal": [], "mask": [], "deform": []}
         self.optimization_steps = 0
 
         self.lr = self.conf.get_float('train.learning_rate')
@@ -159,17 +167,11 @@ class IDRTrainRunner:
                                                         self.conf.get_float('train.learning_rate_cam'))
 
         self.start_epoch = 0
-        if is_continue:
+        if self._is_continue:
             old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
 
             print("Continuing from", old_checkpnts_dir)
-            try:
-                with open(os.path.join(old_checkpnts_dir, "latent_table.pickle"), 'rb') as handle:
-                    self.lat_vecs = pickle.load(handle)
-                with open(os.path.join(old_checkpnts_dir, "loss_hist.pickle"), 'rb') as handle:
-                    self.loss_hist = pickle.load(handle)
-            except FileNotFoundError:
-                pass
+            self.lat_vecs = self.storage.get_latest("lat_vecs")
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -200,6 +202,7 @@ class IDRTrainRunner:
         self.n_batches = len(self.train_dataloader)
         self.plot_freq = self.conf.get_int('train.plot_freq')
         self.checkpoint_freq = self.conf.get_int('train.checkpoint_freq')
+        self.storage_freq = self.conf.get_int("train.storage_freq")
         self.plot_conf = self.conf.get_config('plot')
 
         self.alpha_milestones = self.conf.get_list('train.alpha_milestones', default=[])
@@ -208,46 +211,42 @@ class IDRTrainRunner:
             if self.start_epoch > acc:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
-    def save_checkpoints(self, epoch):
-        # Save loss history
-        with open(os.path.join(self.checkpoints_path, "loss_hist.pickle"), 'wb') as handle:
-            pickle.dump(self.loss_hist, handle)
-        with open(os.path.join(self.checkpoints_path, "latent_table.pickle"), 'wb') as handle:
-            pickle.dump(self.lat_vecs, handle)
+    def save_checkpoints(self, opt_steps):
+
         torch.save(
-            {"epoch": epoch, "model_state_dict": self.model.state_dict()},
-            os.path.join(self.checkpoints_path, self.model_params_subdir, str(epoch) + ".pth"))
+            {"epoch": opt_steps, "model_state_dict": self.model.state_dict()},
+            os.path.join(self.checkpoints_path, self.model_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": epoch, "model_state_dict": self.model.state_dict()},
+            {"epoch": opt_steps, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, "latest.pth"))
 
         torch.save(
-            {"epoch": epoch, "optimizer_state_dict": self.optimizer.state_dict()},
-            os.path.join(self.checkpoints_path, self.optimizer_params_subdir, str(epoch) + ".pth"))
+            {"epoch": opt_steps, "optimizer_state_dict": self.optimizer.state_dict()},
+            os.path.join(self.checkpoints_path, self.optimizer_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": epoch, "optimizer_state_dict": self.optimizer.state_dict()},
+            {"epoch": opt_steps, "optimizer_state_dict": self.optimizer.state_dict()},
             os.path.join(self.checkpoints_path, self.optimizer_params_subdir, "latest.pth"))
 
         torch.save(
-            {"epoch": epoch, "scheduler_state_dict": self.scheduler.state_dict()},
-            os.path.join(self.checkpoints_path, self.scheduler_params_subdir, str(epoch) + ".pth"))
+            {"epoch": opt_steps, "scheduler_state_dict": self.scheduler.state_dict()},
+            os.path.join(self.checkpoints_path, self.scheduler_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": epoch, "scheduler_state_dict": self.scheduler.state_dict()},
+            {"epoch": opt_steps, "scheduler_state_dict": self.scheduler.state_dict()},
             os.path.join(self.checkpoints_path, self.scheduler_params_subdir, "latest.pth"))
 
         if self.train_cameras:
             torch.save(
-                {"epoch": epoch, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
-                os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir, str(epoch) + ".pth"))
+                {"epoch": opt_steps, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
+                os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir, str(opt_steps) + ".pth"))
             torch.save(
-                {"epoch": epoch, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
+                {"epoch": opt_steps, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
                 os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir, "latest.pth"))
 
             torch.save(
-                {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
-                os.path.join(self.checkpoints_path, self.cam_params_subdir, str(epoch) + ".pth"))
+                {"epoch": opt_steps, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
+                os.path.join(self.checkpoints_path, self.cam_params_subdir, str(opt_steps) + ".pth"))
             torch.save(
-                {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
+                {"epoch": opt_steps, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
     def plot(self, epoch, n_plots=3):
@@ -303,36 +302,85 @@ class IDRTrainRunner:
             self.pose_vecs.train()
         torch.cuda.empty_cache()
 
+    def backward(self, model_outputs, ground_truth):
+        loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
+        loss = loss_output['loss']
+
+        self.optimizer.zero_grad()
+        if self.train_cameras:
+            self.optimizer_cam.zero_grad()
+
+        loss.backward()
+
+        self.optimizer.step()
+        if self.train_cameras:
+            self.optimizer_cam.step()
+
+        if self.optimization_steps % 50 == 0:
+            self.storage.add_entry("rgb_loss", loss_output['rgb_loss'].item())
+            self.storage.add_entry("eikonal_loss", loss_output['eikonal_loss'].item())
+            self.storage.add_entry("mask_loss", loss_output['mask_loss'].item())
+            self.storage.add_entry("deform_loss", loss_output["deform_loss"].item())
+
+        if self.optimization_steps % 100 == 0:
+            deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
+            corr_mags = torch.abs(model_outputs["correction"])
+
+            deform_mags = {
+                "deform": np.histogram(deformation_mags.detach().cpu().numpy(), bins=100),
+                "correction": np.histogram(corr_mags.detach().cpu().numpy(), bins=100)
+            }
+            self.storage.add_entry("deformnet_magnitude_histograms", deform_mags)
+
+        if self.optimization_steps % self.plot_freq == 0:
+            self.plot(self.optimization_steps // self.plot_freq)
+
+        if self.optimization_steps % self.checkpoint_freq == 0:
+            self.save_checkpoints(self.optimization_steps)
+
+        if self.optimization_steps % self.storage_freq == 0:
+            self.storage.save()
+
+        # if data_index % 500 == 0:
+        #     for i in range(self.lat_size ** 2):
+        #         latent_code = torch.rand(self.lat_size).cuda()
+        #         model_input["obj"] = latent_code
+        #         points, _, _ = self.model.get_points(model_input)
+        #         points_hist.append((latent_code, points))
+        #     with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
+        #         pickle.dump(points_hist, handle)
+
+        if self.optimization_steps % 50 == 0:
+            epoch = self.optimization_steps // self.num_datapoints
+            idx = self.optimization_steps % self.num_datapoints
+            print(
+                '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, deform_loss = {8}, alpha = {9}, lr = {10}'
+                    .format(self.expname, epoch, idx, self.n_batches, loss.item(),
+                            loss_output['rgb_loss'].item(),
+                            loss_output['eikonal_loss'].item(),
+                            loss_output['mask_loss'].item(),
+                            loss_output["deform_loss"].item(),
+                            self.loss.alpha,
+                            self.scheduler.get_lr()[0]))
+
     def run(self):
-        print("initializing latent table...")
-
         print("training...")
-
-        latent_vec_history = []
-        plot_epoch = 0
+        datapoints = list(self.train_dataloader)
+        self.num_datapoints = len(datapoints)
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
-            latent_vec_history.append(torch.clone(self.lat_vecs.weight))
-            with open(os.path.join(self.plots_dir, "latent_table.pickle"), 'wb') as handle:
-                pickle.dump(latent_vec_history, handle)
-            # Save loss history
-            with open(os.path.join(self.plots_dir, "loss_hist.pickle"), 'wb') as handle:
-                pickle.dump(self.loss_hist, handle)
+            lv = torch.clone(self.lat_vecs.weight)
+            self.storage.add_entry("lat_vecs", lv)
 
             if epoch in self.alpha_milestones:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
-
-
             self.train_dataset.change_sampling_idx(self.num_pixels)
 
-            datapoints = list(self.train_dataloader)
             random.shuffle(datapoints)
 
             for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
-                                                                              total=len(datapoints)):
-                self.optimization_steps += 1
-
+                                                                              total=self.num_datapoints):
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
@@ -345,52 +393,6 @@ class IDRTrainRunner:
                     model_input['pose'] = model_input['pose'].cuda()
 
                 model_outputs = self.model(model_input)
-                loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
-
-                loss = loss_output['loss']
-
-                self.optimizer.zero_grad()
-                if self.train_cameras:
-                    self.optimizer_cam.zero_grad()
-
-                loss.backward()
-
-
-                self.optimizer.step()
-                if self.train_cameras:
-                    self.optimizer_cam.step()
-
-                if self.optimization_steps % 50 == 0:
-                    self.loss_hist["rgb"].append(loss_output['rgb_loss'].item())
-                    self.loss_hist["eikonal"].append(loss_output['eikonal_loss'].item())
-                    self.loss_hist["mask"].append(loss_output['mask_loss'].item())
-                    self.loss_hist["deform"].append(loss_output["deform_loss"].item())
-
-                if self.optimization_steps % self.plot_freq == 0:
-                    self.plot(plot_epoch)
-                    plot_epoch += 1
-
-                if self.optimization_steps % self.checkpoint_freq == 0:
-                    self.save_checkpoints(epoch)
-
-                # if data_index % 500 == 0:
-                #     for i in range(self.lat_size ** 2):
-                #         latent_code = torch.rand(self.lat_size).cuda()
-                #         model_input["obj"] = latent_code
-                #         points, _, _ = self.model.get_points(model_input)
-                #         points_hist.append((latent_code, points))
-                #     with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
-                #         pickle.dump(points_hist, handle)
-
-                if data_index % 50 == 0:
-                    print(
-                        '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, deform_loss = {8}, alpha = {9}, lr = {10}'
-                            .format(self.expname, epoch, data_index, self.n_batches, loss.item(),
-                                    loss_output['rgb_loss'].item(),
-                                    loss_output['eikonal_loss'].item(),
-                                    loss_output['mask_loss'].item(),
-                                    loss_output["deform_loss"].item(),
-                                    self.loss.alpha,
-                                    self.scheduler.get_lr()[0]))
-
+                self.backward(model_outputs, ground_truth)
+                self.optimization_steps += 1
             self.scheduler.step()
