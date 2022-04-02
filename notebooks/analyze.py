@@ -1,7 +1,7 @@
 from pathlib import Path
 from training.exp_storage import ExpStorage
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_02_00_51_39")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_02_01_25_06")
 
 storage = ExpStorage.load(exp_path / "storage.pickle")
 

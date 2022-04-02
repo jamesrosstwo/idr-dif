@@ -397,5 +397,5 @@ class IDRTrainRunner:
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
                 self.optimization_steps += 1
-                self.model.deform_reg_strength -= self.model.deform_reg_decay
+                self.model.deform_reg_strength = max(self.model.deform_reg_strength - self.model.deform_reg_decay, 0)
             self.scheduler.step()
