@@ -197,6 +197,7 @@ class IDRNetwork(nn.Module):
         deform_config = conf.get_config("deform_network")
         self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
         self.deform_reg_strength = deform_config["base_reg_strength"]
+        self.deform_reg_decay = deform_config["reg_decay"]
 
         self.implicit_network = ImplicitNetwork(self.feature_vector_size, self.deform_net, **implicit_conf)
         self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)

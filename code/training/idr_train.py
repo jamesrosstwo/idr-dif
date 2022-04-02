@@ -320,14 +320,16 @@ class IDRTrainRunner:
             self.storage.add_entry("eikonal_loss", loss_output['eikonal_loss'].item())
             self.storage.add_entry("mask_loss", loss_output['mask_loss'].item())
             self.storage.add_entry("deform_loss", loss_output["deform_loss"].item())
+            self.storage.add_entry("total_loss", loss_output["loss"].item())
+            self.storage.add_entry("deform_reg_str", self.model.deform_reg_strength)
 
         if self.optimization_steps % 100 == 0:
             deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
             corr_mags = torch.abs(model_outputs["correction"])
 
             deform_mags = {
-                "deform": np.histogram(deformation_mags.detach().cpu().numpy(), bins=100),
-                "correction": np.histogram(corr_mags.detach().cpu().numpy(), bins=100)
+                "deform": np.histogram(deformation_mags.detach().cpu().numpy(), bins=150, range=(0, 0.5), density=True),
+                "correction": np.histogram(corr_mags.detach().cpu().numpy(), bins=150, range=(0, 0.5), density=True)
             }
             self.storage.add_entry("deformnet_magnitude_histograms", deform_mags)
 
@@ -395,4 +397,5 @@ class IDRTrainRunner:
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
                 self.optimization_steps += 1
+                self.model.deform_reg_strength -= self.model.deform_reg_decay
             self.scheduler.step()
