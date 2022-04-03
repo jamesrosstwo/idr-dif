@@ -367,7 +367,6 @@ class IDRTrainRunner:
     def run(self):
         print("training...")
 
-
         for epoch in range(self.start_epoch, self.nepochs + 1):
             lv = torch.clone(self.lat_vecs.weight)
             self.storage.add_entry("lat_vecs", lv)
@@ -396,6 +395,8 @@ class IDRTrainRunner:
 
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
+
                 self.optimization_steps += 1
-                self.model.deform_reg_strength = max(self.model.deform_reg_strength - self.model.deform_reg_decay, 0)
+                self.model.deform_reg_strength = self.model.base_deform_reg / (
+                            1 + (self.optimization_steps * self.model.deform_reg_decay))
             self.scheduler.step()

@@ -1,7 +1,7 @@
 from pathlib import Path
 from training.exp_storage import ExpStorage
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_02_01_25_06")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_02_20_03_15")
 
 storage = ExpStorage.load(exp_path / "storage.pickle")
 
@@ -15,11 +15,11 @@ for i in range(len(loss_viz_data["rgb_loss"])):
 
 import pandas as pd
 
-loss_hist_df = pd.DataFrame(loss_data, columns=["idx", "loss", "type"])
+loss_hist_df = pd.DataFrame(loss_data, columns=["idx", "value", "type"])
 
 import plotly.express as px
 
-fig = px.line(loss_hist_df, x="idx", y="loss", color="type", log_y=True)
+fig = px.line(loss_hist_df, x="idx", y="value", color="type", log_y=False)
 fig.write_html("loss_hist.html")
 
 # exp_path2 = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_7\\2022_03_21_12_32_49\\plots")

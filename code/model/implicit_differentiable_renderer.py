@@ -196,7 +196,8 @@ class IDRNetwork(nn.Module):
         # Deform-Net
         deform_config = conf.get_config("deform_network")
         self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
-        self.deform_reg_strength = deform_config["base_reg_strength"]
+        self.base_deform_reg = deform_config["base_reg_strength"]
+        self.deform_reg_strength = self.base_deform_reg
         self.deform_reg_decay = deform_config["reg_decay"]
 
         self.implicit_network = ImplicitNetwork(self.feature_vector_size, self.deform_net, **implicit_conf)
@@ -305,7 +306,7 @@ class IDRNetwork(nn.Module):
 
         hypo_params = self.hyper_net(latent_code)
         output = self.implicit_network(points, hypo_params, latent_code)
-        g = self.implicit_network.gradient(points, hypo_params, latent_code)
+        g = self.implicit_network.gradient(points, hypo_params, latent_code, deform=False)
         normals = g[:, 0, :]
 
         feature_vectors = output[:, 1:]
