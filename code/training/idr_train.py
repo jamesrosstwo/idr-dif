@@ -324,7 +324,7 @@ class IDRTrainRunner:
             self.storage.add_entry("total_loss", loss_output["loss"].item())
             self.storage.add_entry("deform_reg_str", self.model.deform_reg_strength)
 
-        if self.optimization_steps % 100 == 0:
+        if self.optimization_steps % 200 == 0:
             deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
             corr_mags = torch.abs(model_outputs["correction"]).flatten()
 
