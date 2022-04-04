@@ -403,4 +403,4 @@ class IDRTrainRunner:
             out = b
         else:
             out = a
-        return max(out, 0)
+        return max(out, 50)

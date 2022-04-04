@@ -8,7 +8,7 @@ import plotly.express as px
 
 from training.exp_storage import ExpStorage
 
-exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_04_08_36_05")
+exp_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_3\\2022_04_04_08_56_34")
 # exp_path = Path("C:\\Users\\james\\Desktop\\latest2\\2022_04_03_02_11_48")
 storage = ExpStorage.load(exp_path / "storage.pickle")
 
@@ -22,7 +22,7 @@ for i in range(len(loss_viz_data["rgb_loss"])):
 
 loss_hist_df = pd.DataFrame(loss_data, columns=["idx", "value", "type"])
 
-fig = px.line(loss_hist_df, x="idx", y="value", color="type", log_y=False)
+fig = px.line(loss_hist_df, x="idx", y="value", color="type", log_y=True)
 fig.write_html("loss_hist.html")
 
 data = []
