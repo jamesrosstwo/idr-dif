@@ -75,10 +75,11 @@ class IDRTrainRunner:
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.optimizer_params_subdir))
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.scheduler_params_subdir))
 
-        storage_path = Path(os.path.join(self.expdir, self.timestamp, "storage.pickle"))
         if self._is_continue:
+            storage_path = Path(os.path.join(self.expdir, timestamp, "storage.pickle"))
             self.storage = ExpStorage.load(storage_path)
         else:
+            storage_path = Path(os.path.join(self.expdir, self.timestamp, "storage.pickle"))
             self.storage = ExpStorage(storage_path)
 
         if self.train_cameras:
@@ -171,7 +172,7 @@ class IDRTrainRunner:
             old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
 
             print("Continuing from", old_checkpnts_dir)
-            self.lat_vecs = self.storage.get_latest("lat_vecs")
+            self.lat_vecs = torch.nn.Embedding.from_pretrained(self.storage.get_latest("lat_vecs"))
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -211,41 +212,41 @@ class IDRTrainRunner:
             if self.start_epoch > acc:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
 
-    def save_checkpoints(self, opt_steps):
+    def save_checkpoints(self, epoch, opt_steps):
         torch.save(
-            {"epoch": opt_steps, "model_state_dict": self.model.state_dict()},
+            {"epoch": epoch, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": opt_steps, "model_state_dict": self.model.state_dict()},
+            {"epoch": epoch, "model_state_dict": self.model.state_dict()},
             os.path.join(self.checkpoints_path, self.model_params_subdir, "latest.pth"))
 
         torch.save(
-            {"epoch": opt_steps, "optimizer_state_dict": self.optimizer.state_dict()},
+            {"epoch": epoch, "optimizer_state_dict": self.optimizer.state_dict()},
             os.path.join(self.checkpoints_path, self.optimizer_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": opt_steps, "optimizer_state_dict": self.optimizer.state_dict()},
+            {"epoch": epoch, "optimizer_state_dict": self.optimizer.state_dict()},
             os.path.join(self.checkpoints_path, self.optimizer_params_subdir, "latest.pth"))
 
         torch.save(
-            {"epoch": opt_steps, "scheduler_state_dict": self.scheduler.state_dict()},
+            {"epoch": epoch, "scheduler_state_dict": self.scheduler.state_dict()},
             os.path.join(self.checkpoints_path, self.scheduler_params_subdir, str(opt_steps) + ".pth"))
         torch.save(
-            {"epoch": opt_steps, "scheduler_state_dict": self.scheduler.state_dict()},
+            {"epoch": epoch, "scheduler_state_dict": self.scheduler.state_dict()},
             os.path.join(self.checkpoints_path, self.scheduler_params_subdir, "latest.pth"))
 
         if self.train_cameras:
             torch.save(
-                {"epoch": opt_steps, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
+                {"epoch": epoch, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
                 os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir, str(opt_steps) + ".pth"))
             torch.save(
-                {"epoch": opt_steps, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
+                {"epoch": epoch, "optimizer_cam_state_dict": self.optimizer_cam.state_dict()},
                 os.path.join(self.checkpoints_path, self.optimizer_cam_params_subdir, "latest.pth"))
 
             torch.save(
-                {"epoch": opt_steps, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
+                {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, str(opt_steps) + ".pth"))
             torch.save(
-                {"epoch": opt_steps, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
+                {"epoch": epoch, "pose_vecs_state_dict": self.pose_vecs.state_dict()},
                 os.path.join(self.checkpoints_path, self.cam_params_subdir, "latest.pth"))
 
     def plot(self, epoch, n_plots=3):
@@ -325,31 +326,22 @@ class IDRTrainRunner:
 
         if self.optimization_steps % 100 == 0:
             deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
-            corr_mags = torch.abs(model_outputs["correction"])
+            corr_mags = torch.abs(model_outputs["correction"]).flatten()
 
             deform_mags = {
-                "deform": np.histogram(deformation_mags.detach().cpu().numpy(), bins=150, range=(0, 0.5), density=True),
-                "correction": np.histogram(corr_mags.detach().cpu().numpy(), bins=150, range=(0, 0.5), density=True)
+                "deform": np.random.choice(deformation_mags.detach().cpu().numpy(), size=150),
+                "correction": np.random.choice(corr_mags.detach().cpu().numpy(), size=150)
             }
-            self.storage.add_entry("deformnet_magnitude_histograms", deform_mags)
+            self.storage.add_entry("deformnet_magnitude", deform_mags)
 
         if self.optimization_steps % self.plot_freq == 0:
             self.plot(self.optimization_steps // self.plot_freq)
 
         if self.optimization_steps % self.checkpoint_freq == 0:
-            self.save_checkpoints(self.optimization_steps)
+            self.save_checkpoints(self.optimization_steps // self.num_datapoints, self.optimization_steps)
 
         if self.optimization_steps % self.storage_freq == 0:
             self.storage.save()
-
-        # if data_index % 500 == 0:
-        #     for i in range(self.lat_size ** 2):
-        #         latent_code = torch.rand(self.lat_size).cuda()
-        #         model_input["obj"] = latent_code
-        #         points, _, _ = self.model.get_points(model_input)
-        #         points_hist.append((latent_code, points))
-        #     with open(os.path.join(self.plots_dir, "points_hist.pickle"), 'wb') as handle:
-        #         pickle.dump(points_hist, handle)
 
         if self.optimization_steps % 50 == 0:
             epoch = self.optimization_steps // self.num_datapoints
@@ -397,6 +389,13 @@ class IDRTrainRunner:
                 self.backward(model_outputs, ground_truth)
 
                 self.optimization_steps += 1
-                self.model.deform_reg_strength = self.model.base_deform_reg / (
-                            1 + (self.optimization_steps * self.model.deform_reg_decay))
+                self.model.deform_reg_strength = self.get_deform_get_str()
             self.scheduler.step()
+
+    def get_deform_get_str(self):
+        a = self.model.base_deform_reg / (
+                1 + (self.optimization_steps * self.model.deform_reg_decay))
+        b = self.model.base_deform_reg * 0.1 - (20 * self.model.deform_reg_decay) * self.optimization_steps
+        if self.optimization_steps > self.model.base_deform_reg:
+            return b
+        return a

@@ -29,7 +29,7 @@ class ExpStorage:
 
     def get_latest(self, *keys):
         if len(keys) == 1:
-            return self.get_all(keys)[-1]
+            return self.get_all(*keys)[-1]
         return {k: v[-1] for k, v in self.get_all(keys).items()}
 
     def to_df(self, *keys) -> pd.DataFrame:
