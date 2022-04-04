@@ -11,6 +11,15 @@ class ExpStorage:
         self._entries = dict() if entries is None else entries
         self.metadata = dict()
 
+    @classmethod
+    def load(cls, load_path: Path):
+        with open(str(load_path), "rb") as handle:
+            return cls(load_path, pickle.load(handle))
+
+    @property
+    def keys(self):
+        return list(self._entries.keys())
+
     def add_entry(self, key: str, entry: Any):
         if key not in self._entries:
             self._entries[key] = list()
@@ -32,10 +41,18 @@ class ExpStorage:
             return self.get_all(*keys)[-1]
         return {k: v[-1] for k, v in self.get_all(keys).items()}
 
+    def get_latest_with_default(self, key, default=None):
+        if key in self.keys:
+            return self._entries[key][-1]
+        return default
+
     def to_df(self, *keys) -> pd.DataFrame:
         return pd.DataFrame.from_dict({k: self._entries[k] for k in keys})
 
-    @classmethod
-    def load(cls, load_path: Path):
-        with open(str(load_path), "rb") as handle:
-            return cls(load_path, pickle.load(handle))
+    def change_path(self, new_path: Path):
+        self.loc = new_path
+
+    def delete_after(self, idx: int, *keys):
+        assert all([key in self._entries for key in keys])
+        for key in keys:
+            self._entries[key] = self._entries[key][:idx]

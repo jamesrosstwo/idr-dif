@@ -75,11 +75,12 @@ class IDRTrainRunner:
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.optimizer_params_subdir))
         utils.mkdir_ifnotexists(os.path.join(self.checkpoints_path, self.scheduler_params_subdir))
 
+        storage_path = Path(os.path.join(self.expdir, self.timestamp, "storage.pickle"))
         if self._is_continue:
-            storage_path = Path(os.path.join(self.expdir, timestamp, "storage.pickle"))
-            self.storage = ExpStorage.load(storage_path)
+            old_storage_path = Path(os.path.join(self.expdir, timestamp, "storage.pickle"))
+            self.storage = ExpStorage.load(old_storage_path)
+            self.storage.change_path(storage_path)
         else:
-            storage_path = Path(os.path.join(self.expdir, self.timestamp, "storage.pickle"))
             self.storage = ExpStorage(storage_path)
 
         if self.train_cameras:
@@ -177,7 +178,8 @@ class IDRTrainRunner:
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
             self.model.load_state_dict(saved_model_state["model_state_dict"])
-            self.start_epoch = saved_model_state['epoch']
+            self.start_epoch = self.storage.get_latest("epoch")
+            self.optimization_steps = self.storage.get_latest("optimization_steps")
 
             data = torch.load(
                 os.path.join(old_checkpnts_dir, 'OptimizerParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -303,6 +305,7 @@ class IDRTrainRunner:
         torch.cuda.empty_cache()
 
     def backward(self, model_outputs, ground_truth):
+        self.model.deform_reg_strength = self.get_deform_get_str()
         loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
         loss = loss_output['loss']
 
@@ -323,6 +326,8 @@ class IDRTrainRunner:
             self.storage.add_entry("deform_loss", loss_output["deform_loss"].item())
             self.storage.add_entry("total_loss", loss_output["loss"].item())
             self.storage.add_entry("deform_reg_str", self.model.deform_reg_strength)
+            self.storage.add_entry("optimization_steps", self.optimization_steps)
+            self.storage.add_entry("epoch", self.optimization_steps // self.num_datapoints)
 
         if self.optimization_steps % 200 == 0:
             deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
@@ -387,9 +392,7 @@ class IDRTrainRunner:
 
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
-
                 self.optimization_steps += 1
-                self.model.deform_reg_strength = self.get_deform_get_str()
             self.scheduler.step()
 
     def get_deform_get_str(self):
@@ -397,5 +400,7 @@ class IDRTrainRunner:
                 1 + (self.optimization_steps * self.model.deform_reg_decay))
         b = self.model.base_deform_reg * 0.1 - (20 * self.model.deform_reg_decay) * self.optimization_steps
         if self.optimization_steps > self.model.base_deform_reg:
-            return b
-        return a
+            out = b
+        else:
+            out = a
+        return max(out, 0)
