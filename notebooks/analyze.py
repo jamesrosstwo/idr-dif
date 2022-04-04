@@ -46,18 +46,9 @@ correction_fig = go.Figure()
 ratio = len(hists) // n_traces
 
 for i in range(0, n_traces):
-# d_freqs, d_bins = hists[i]["deform"]
-# c_freqs, c_bins = hists[i]["correction"]
     color = colors[i]
-
-# d_freqs = (d_freqs * 100).astype(int)
-# c_freqs = (c_freqs * 100).astype(int)
-
-# sim_def_data = np.random.uniform(np.repeat(d_bins[:-1], d_freqs), np.repeat(d_bins[1:], d_freqs))
-deform_fig.add_trace(go.Violin(x=hists[i * 2]["deform"], line_color=color))
-
-# sim_cor_data = np.random.uniform(np.repeat(c_bins[:-1], c_freqs), np.repeat(c_bins[1:], c_freqs))
-correction_fig.add_trace(go.Violin(x=hists[i * 2]["correction"], line_color=color))
+    deform_fig.add_trace(go.Violin(x=hists[i * 2]["deform"], line_color=color))
+    correction_fig.add_trace(go.Violin(x=hists[i * 2]["correction"], line_color=color))
 
 deform_fig.update_traces(orientation='h', side='positive', width=3, points=False)
 deform_fig.update_layout(
