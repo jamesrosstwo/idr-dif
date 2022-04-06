@@ -200,7 +200,6 @@ class IDRNetwork(nn.Module):
         self.deform_reg_decay = deform_config["reg_decay"]
         self.deform_reg_strength = self.base_deform_reg
 
-
         self.implicit_network = ImplicitNetwork(self.feature_vector_size, self.deform_net, **implicit_conf)
         self.rendering_network = RenderingNetwork(self.feature_vector_size, **rendering_conf)
 
@@ -308,9 +307,11 @@ class IDRNetwork(nn.Module):
         hypo_params = self.hyper_net(latent_code)
         output = self.implicit_network(points, hypo_params, latent_code)
         g = self.implicit_network.gradient(points, hypo_params, latent_code, deform=False)
-        normals = g[:, 0, :]
+        normals = torch.zeros(g[:, 0, :].shape).cuda()
+        v_dirs = torch.zeros(view_dirs.shape).cuda()
 
         feature_vectors = output[:, 1:]
+
         rgb_vals = self.rendering_network(points, normals, view_dirs, feature_vectors, latent_code)
 
         return rgb_vals

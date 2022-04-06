@@ -8,9 +8,10 @@ from model.implicit_differentiable_renderer import IDRNetwork
 
 
 class IDRLoss(nn.Module):
-    def __init__(self, model: IDRNetwork, eikonal_weight, mask_weight, alpha):
+    def __init__(self, model: IDRNetwork, rgb_weight, eikonal_weight, mask_weight, alpha):
         super().__init__()
         self.model = model
+        self.rgb_weight = rgb_weight
         self.eikonal_weight = eikonal_weight
         self.mask_weight = mask_weight
         self.alpha = alpha
@@ -58,7 +59,7 @@ class IDRLoss(nn.Module):
 
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])
 
-        loss = rgb_loss + \
+        loss = self.rgb_weight * rgb_loss + \
                self.eikonal_weight * eikonal_loss + \
                self.mask_weight * mask_loss + \
                self.model.deform_reg_strength * deform_loss

@@ -5,11 +5,26 @@ from typing import Any, List, Union, Dict
 import pandas as pd
 
 
+class AvgCache:
+    def __init__(self):
+        self._entries: Dict[str, List[float]] = dict()
+
+    def add_entry(self, key: str, val: float):
+        if key not in self._entries:
+            self._entries[key] = list()
+        self._entries[key].append(val)
+
+    def pop_all(self) -> Dict[str, float]:
+        out = {k: sum(v) / len(v) for k, v in self._entries.items()}
+        self._entries = dict()
+        return out
+
 class ExpStorage:
     def __init__(self, out_location: Path, entries=None):
         self.loc: Path = out_location
         self._entries = dict() if entries is None else entries
         self.metadata = dict()
+        self._cache = AvgCache()
 
     @classmethod
     def load(cls, load_path: Path):
@@ -20,14 +35,13 @@ class ExpStorage:
     def keys(self):
         return list(self._entries.keys())
 
-    def add_entry(self, key: str, entry: Any):
+    def cache(self, key: str, val: float):
+        self._cache.add_entry(key, val)
+
+    def store(self, key: str, entry: Any):
         if key not in self._entries:
             self._entries[key] = list()
         self._entries[key].append(entry)
-
-    def save(self):
-        with open(str(self.loc), "wb") as handle:
-            pickle.dump(self._entries, handle)
 
     def get_all(self, *keys) -> Union[List[Any], Dict[str, List[Any]]]:
         assert len(keys) > 0
@@ -39,7 +53,7 @@ class ExpStorage:
     def get_latest(self, *keys):
         if len(keys) == 1:
             return self.get_all(*keys)[-1]
-        return {k: v[-1] for k, v in self.get_all(keys).items()}
+        return {k: v[-1] for k, v in self.get_all(*keys).items()}
 
     def get_latest_with_default(self, key, default=None):
         if key in self.keys:
@@ -49,10 +63,18 @@ class ExpStorage:
     def to_df(self, *keys) -> pd.DataFrame:
         return pd.DataFrame.from_dict({k: self._entries[k] for k in keys})
 
-    def change_path(self, new_path: Path):
-        self.loc = new_path
-
     def delete_after(self, idx: int, *keys):
         assert all([key in self._entries for key in keys])
         for key in keys:
             self._entries[key] = self._entries[key][:idx]
+
+    def pop_cache(self):
+        for k, v in self._cache.pop_all().items():
+            self.store(k, v)
+
+    def change_path(self, new_path: Path):
+        self.loc = new_path
+
+    def save(self):
+        with open(str(self.loc), "wb") as handle:
+            pickle.dump(self._entries, handle)

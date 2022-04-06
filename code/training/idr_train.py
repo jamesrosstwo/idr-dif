@@ -319,15 +319,26 @@ class IDRTrainRunner:
         if self.train_cameras:
             self.optimizer_cam.step()
 
+        self.storage.cache("rgb_loss", loss_output['rgb_loss'].item())
+        self.storage.cache("eikonal_loss", loss_output['eikonal_loss'].item())
+        self.storage.cache("mask_loss", loss_output['mask_loss'].item())
+        self.storage.cache("deform_loss", loss_output["deform_loss"].item())
+        self.storage.cache("total_loss", loss_output["loss"].item())
+        self.storage.cache("deform_reg_str", self.model.deform_reg_strength)
+        self.storage.cache("optimization_steps", self.optimization_steps)
+        self.storage.cache("epoch", self.optimization_steps // self.num_datapoints)
+
         if self.optimization_steps % 50 == 0:
-            self.storage.add_entry("rgb_loss", loss_output['rgb_loss'].item())
-            self.storage.add_entry("eikonal_loss", loss_output['eikonal_loss'].item())
-            self.storage.add_entry("mask_loss", loss_output['mask_loss'].item())
-            self.storage.add_entry("deform_loss", loss_output["deform_loss"].item())
-            self.storage.add_entry("total_loss", loss_output["loss"].item())
-            self.storage.add_entry("deform_reg_str", self.model.deform_reg_strength)
-            self.storage.add_entry("optimization_steps", self.optimization_steps)
-            self.storage.add_entry("epoch", self.optimization_steps // self.num_datapoints)
+            self.storage.pop_cache()
+            epoch = self.optimization_steps // self.num_datapoints
+            idx = self.optimization_steps % self.num_datapoints
+            print(
+                '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, deform_loss = {8}, alpha = {9}, lr = {10}'
+                    .format(self.expname, epoch, idx, self.n_batches,
+                            *list(self.storage.get_latest("total_loss", "rgb_loss", "eikonal_loss", "mask_loss",
+                                                     "deform_loss").values()),
+                            self.loss.alpha,
+                            self.scheduler.get_lr()[0]))
 
         if self.optimization_steps % 200 == 0:
             deformation_mags = torch.linalg.norm(model_outputs["deformation"], dim=1)
@@ -337,7 +348,7 @@ class IDRTrainRunner:
                 "deform": np.random.choice(deformation_mags.detach().cpu().numpy(), size=150),
                 "correction": np.random.choice(corr_mags.detach().cpu().numpy(), size=150)
             }
-            self.storage.add_entry("deformnet_magnitude", deform_mags)
+            self.storage.store("deformnet_magnitude", deform_mags)
 
         if self.optimization_steps % self.plot_freq == 0:
             self.plot(self.optimization_steps // self.plot_freq)
@@ -348,25 +359,12 @@ class IDRTrainRunner:
         if self.optimization_steps % self.storage_freq == 0:
             self.storage.save()
 
-        if self.optimization_steps % 50 == 0:
-            epoch = self.optimization_steps // self.num_datapoints
-            idx = self.optimization_steps % self.num_datapoints
-            print(
-                '{0} [{1}] ({2}/{3}): loss = {4}, rgb_loss = {5}, eikonal_loss = {6}, mask_loss = {7}, deform_loss = {8}, alpha = {9}, lr = {10}'
-                    .format(self.expname, epoch, idx, self.n_batches, loss.item(),
-                            loss_output['rgb_loss'].item(),
-                            loss_output['eikonal_loss'].item(),
-                            loss_output['mask_loss'].item(),
-                            loss_output["deform_loss"].item(),
-                            self.loss.alpha,
-                            self.scheduler.get_lr()[0]))
-
     def run(self):
         print("training...")
 
         for epoch in range(self.start_epoch, self.nepochs + 1):
             lv = torch.clone(self.lat_vecs.weight)
-            self.storage.add_entry("lat_vecs", lv)
+            self.storage.store("lat_vecs", lv)
 
             if epoch in self.alpha_milestones:
                 self.loss.alpha = self.loss.alpha * self.alpha_factor
@@ -396,11 +394,12 @@ class IDRTrainRunner:
             self.scheduler.step()
 
     def get_deform_get_str(self):
-        a = self.model.base_deform_reg / (
-                1 + (self.optimization_steps * self.model.deform_reg_decay))
-        b = self.model.base_deform_reg * 0.1 - (20 * self.model.deform_reg_decay) * self.optimization_steps
-        if self.optimization_steps > self.model.base_deform_reg:
-            out = b
-        else:
-            out = a
-        return max(out, 50)
+        # a = self.model.base_deform_reg / (
+        #         1 + (self.optimization_steps * self.model.deform_reg_decay))
+        # b = self.model.base_deform_reg * 0.1 - (20 * self.model.deform_reg_decay) * self.optimization_steps
+        # if self.optimization_steps > self.model.base_deform_reg:
+        #     out = b
+        # else:
+        #     out = a
+        # return max(out, 50)
+        return self.model.base_deform_reg
