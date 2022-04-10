@@ -312,6 +312,6 @@ class IDRNetwork(nn.Module):
 
         feature_vectors = output[:, 1:]
 
-        rgb_vals = self.rendering_network(points, normals, view_dirs, feature_vectors, latent_code)
+        rgb_vals = self.rendering_network(points, normals, v_dirs, feature_vectors, latent_code)
 
         return rgb_vals

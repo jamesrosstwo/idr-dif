@@ -1,23 +1,54 @@
 import pickle
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Union, Dict
 
 import pandas as pd
+import torch
 
 
-class AvgCache:
+class DataCache(ABC):
     def __init__(self):
-        self._entries: Dict[str, List[float]] = dict()
+        self._entries: Dict[str, List[Any]] = dict()
 
-    def add_entry(self, key: str, val: float):
+    def add_entry(self, key: str, val: Any):
         if key not in self._entries:
             self._entries[key] = list()
         self._entries[key].append(val)
 
-    def pop_all(self) -> Dict[str, float]:
-        out = {k: sum(v) / len(v) for k, v in self._entries.items()}
+    @abstractmethod
+    def peek_all(self):
+        pass
+
+    def pop_all(self) -> Dict[str, Any]:
+        out = self.peek_all()
         self._entries = dict()
         return out
+
+
+class TensorStackCache(DataCache):
+    def __init__(self, cuda=True):
+        self._stack_fn = lambda v: torch.stack(v)
+        if cuda:
+            self._stack_fn = lambda v: torch.stack(v).cuda()
+        super().__init__()
+
+    def add_entry(self, key: str, val: torch.Tensor):
+        assert isinstance(val, torch.Tensor)
+        super().add_entry(key, val)
+
+    def peek_all(self) -> Dict[str, torch.Tensor]:
+        return {k: self._stack_fn(v) for k, v in self._entries.items()}
+
+
+class AvgCache(DataCache):
+    def add_entry(self, key: str, val: Union[float, int]):
+        assert isinstance(val, float) or isinstance(val, int)
+        super().add_entry(key, val)
+
+    def peek_all(self):
+        return {k: sum(v) / len(v) for k, v in self._entries.items()}
+
 
 class ExpStorage:
     def __init__(self, out_location: Path, entries=None):
@@ -70,6 +101,10 @@ class ExpStorage:
 
     def pop_cache(self):
         for k, v in self._cache.pop_all().items():
+            self.store(k, v)
+
+    def peek_cache(self):
+        for k, v in self._cache.peek_all().items():
             self.store(k, v)
 
     def change_path(self, new_path: Path):

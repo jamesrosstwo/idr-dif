@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from model.implicit_differentiable_renderer import IDRNetwork
 from model.loss import IDRLoss
-from training.exp_storage import ExpStorage
+from training.exp_storage import ExpStorage, TensorStackCache
 
 
 class IDRTrainRunner:
@@ -26,6 +26,7 @@ class IDRTrainRunner:
 
         self.conf = ConfigFactory.parse_file(kwargs['conf'])
         self.batch_size = kwargs['batch_size']
+        self.batch_cache: TensorStackCache = TensorStackCache()
         self.nepochs = kwargs['nepochs']
         self.exps_folder_name = kwargs['exps_folder_name']
         self.GPU_INDEX = kwargs['gpu_index']
@@ -178,8 +179,8 @@ class IDRTrainRunner:
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
             self.model.load_state_dict(saved_model_state["model_state_dict"])
-            self.start_epoch = self.storage.get_latest("epoch")
-            self.optimization_steps = self.storage.get_latest("optimization_steps")
+            self.start_epoch = int(self.storage.get_latest("epoch"))
+            self.optimization_steps = int(self.storage.get_latest("optimization_steps"))
 
             data = torch.load(
                 os.path.join(old_checkpnts_dir, 'OptimizerParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -308,7 +309,11 @@ class IDRTrainRunner:
         self.model.deform_reg_strength = self.get_deform_get_str()
         loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
         loss = loss_output['loss']
+        # self.batch_cache.add_entry("loss", loss)
 
+
+        # if self.optimization_steps % self.batch_size == 0:
+        #     batch_loss = torch.mean(self.batch_cache.pop_all()["loss"]).cuda()
         self.optimizer.zero_grad()
         if self.train_cameras:
             self.optimizer_cam.zero_grad()
@@ -325,7 +330,7 @@ class IDRTrainRunner:
         self.storage.cache("deform_loss", loss_output["deform_loss"].item())
         self.storage.cache("total_loss", loss_output["loss"].item())
         self.storage.cache("deform_reg_str", self.model.deform_reg_strength)
-        self.storage.cache("optimization_steps", self.optimization_steps)
+        self.storage.cache("optimization_steps", int(self.optimization_steps))
         self.storage.cache("epoch", self.optimization_steps // self.num_datapoints)
 
         if self.optimization_steps % 50 == 0:
@@ -375,6 +380,8 @@ class IDRTrainRunner:
             self.num_datapoints = len(datapoints)
             random.shuffle(datapoints)
 
+            print("Epoch", epoch, "Alpha:", self.loss.alpha)
+
             for data_index, (indices, model_input, ground_truth) in tqdm.tqdm(enumerate(datapoints),
                                                                               total=self.num_datapoints):
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
@@ -391,7 +398,7 @@ class IDRTrainRunner:
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
                 self.optimization_steps += 1
-            self.scheduler.step()
+            # self.scheduler.step()
 
     def get_deform_get_str(self):
         # a = self.model.base_deform_reg / (
