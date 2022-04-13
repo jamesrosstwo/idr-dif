@@ -84,6 +84,7 @@ class IDRTrainRunner:
         else:
             self.storage = ExpStorage(storage_path)
 
+        self.storage.store("config", self.conf)
         if self.train_cameras:
             self.optimizer_cam_params_subdir = "OptimizerCamParameters"
             self.cam_params_subdir = "CamParameters"
@@ -148,10 +149,10 @@ class IDRTrainRunner:
                     "params": self.model.parameters(),
                     "lr": self.lr
                 },
-                {
-                    "params": self.lat_vecs.parameters(),
-                    "lr": self.lr
-                },
+                # {
+                #     "params": self.lat_vecs.parameters(),
+                #     "lr": self.lr
+                # },
             ]
         )
 
