@@ -113,7 +113,7 @@ class IDRTrainRunner:
 
         self.lat_size = self.conf.get_int('model.latent_vector_size')
 
-        self.lat_vecs = torch.nn.Embedding(self.n_objs, self.lat_size)
+        self.lat_vecs = torch.nn.Embedding(self.n_objs, self.lat_size).cuda()
         torch.nn.init.normal_(
             self.lat_vecs.weight.data,
             0.0,
@@ -143,16 +143,22 @@ class IDRTrainRunner:
 
         self.lr = self.conf.get_float('train.learning_rate')
 
+        if self._is_continue:
+            old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
+
+            print("Continuing from", old_checkpnts_dir)
+            self.lat_vecs = torch.nn.Embedding.from_pretrained(self.storage.get_latest("lat_vecs").cuda())
+
         self.optimizer = torch.optim.Adam(
             [
                 {
                     "params": self.model.parameters(),
                     "lr": self.lr
                 },
-                # {
-                #     "params": self.lat_vecs.parameters(),
-                #     "lr": self.lr
-                # },
+                {
+                    "params": self.lat_vecs.parameters(),
+                    "lr": self.lr
+                },
             ]
         )
 
@@ -175,7 +181,6 @@ class IDRTrainRunner:
             old_checkpnts_dir = os.path.join(self.expdir, timestamp, 'checkpoints')
 
             print("Continuing from", old_checkpnts_dir)
-            self.lat_vecs = torch.nn.Embedding.from_pretrained(self.storage.get_latest("lat_vecs"))
 
             saved_model_state = torch.load(
                 os.path.join(old_checkpnts_dir, 'ModelParameters', str(kwargs['checkpoint']) + ".pth"))
@@ -265,7 +270,7 @@ class IDRTrainRunner:
             model_input["intrinsics"] = model_input["intrinsics"].cuda()
             model_input["uv"] = model_input["uv"].cuda()
             model_input["object_mask"] = model_input["object_mask"].cuda()
-            model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
+            model_input["obj"] = self.lat_vecs(model_input["obj"].cuda())
 
             if self.train_cameras:
                 pose_input = self.pose_vecs(indices.cuda())
@@ -322,6 +327,8 @@ class IDRTrainRunner:
         loss.backward()
 
         self.optimizer.step()
+        print(torch.linalg.norm(self.lat_vecs.weight.grad))
+
         if self.train_cameras:
             self.optimizer_cam.step()
 
@@ -388,7 +395,7 @@ class IDRTrainRunner:
                 model_input["intrinsics"] = model_input["intrinsics"].cuda()
                 model_input["uv"] = model_input["uv"].cuda()
                 model_input["object_mask"] = model_input["object_mask"].cuda()
-                model_input["obj"] = self.lat_vecs(model_input["obj"]).cuda()
+                model_input["obj"] = self.lat_vecs(model_input["obj"].cuda())
 
                 if self.train_cameras:
                     pose_input = self.pose_vecs(indices.cuda())

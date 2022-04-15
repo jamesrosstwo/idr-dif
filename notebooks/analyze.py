@@ -73,5 +73,5 @@ def analyze(exp_path, save_results=True):
 
 if __name__ == "__main__":
     # e_path = Path("C:\\Users\\james\\Desktop\\latest2\\2022_04_03_02_11_48")
-    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_11_00_13_12")
+    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_15_02_24_32")
     analyze(e_path)

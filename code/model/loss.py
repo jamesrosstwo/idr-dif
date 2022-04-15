@@ -42,7 +42,6 @@ class IDRLoss(nn.Module):
         s = sdf_pred.squeeze()
         mask_loss = (1 / self.alpha) * F.binary_cross_entropy_with_logits(s, gt,
                                                                           reduction='sum') / float(object_mask.shape[0])
-        print(torch.min(s).item(), torch.mean(s).item(), torch.max(s).item(), torch.min(gt).item(), torch.mean(gt).item(), torch.max(gt).item(), mask_loss)
         return mask_loss
 
     def forward(self, model_outputs, ground_truth, opt_steps):
