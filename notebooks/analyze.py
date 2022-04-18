@@ -14,7 +14,8 @@ def analyze(exp_path, save_results=True):
     out_path = exp_path / "analysis"
     out_path.mkdir(exist_ok=True)
 
-    loss_viz_names = ["rgb_loss", "eikonal_loss", "mask_loss", "deform_loss", "total_loss", "deform_reg_str"]
+    loss_viz_names = ["rgb_loss", "eikonal_loss", "mask_loss", "deform_loss", "total_loss", "deform_reg_str",
+                      "num_sign_changes"]
 
     loss_viz_data = storage.get_all(*loss_viz_names)
 
@@ -64,8 +65,26 @@ def analyze(exp_path, save_results=True):
         xaxis_title="|Scalar Correction|",
         xaxis_showgrid=False, xaxis_zeroline=True)
 
+    quantile_viz_names = ["raw_sdf_quantiles", "sdf_quantiles"]
+
+    q_storage_data = storage.get_all(*quantile_viz_names)
+    quantiles = [0, 0.25, 0.5, 0.75, 1]
+    quantile_names = ["quantile_{0}".format(str(q)) for q in quantiles]
+
+    quantile_data = []
+    for i in range(len(q_storage_data[quantile_viz_names[0]])):
+        for v_name in quantile_viz_names:
+            for j in range(len(quantiles)):
+                dp_name = v_name + "_" + quantile_names[j]
+                quantile_data.append((i, q_storage_data[v_name][i][j].item(), dp_name))
+
+    quantile_hist_df = pd.DataFrame(quantile_data, columns=["idx", "value", "type"])
+
+    quantile_hist_fig = px.line(quantile_hist_df, x="idx", y="value", color="type", log_y=False)
+
     if save_results:
         loss_hist_fig.write_html(str(out_path / "loss_hist.html"))
+        quantile_hist_fig.write_html(str(out_path / "quantile_hist.html"))
         latent_fig.write_html(str(out_path / "latent.html"))
         deform_fig.write_html(str(out_path / "deformation_histograms.html"))
         correction_fig.write_html(str(out_path / "correction_histograms.html"))
@@ -73,5 +92,5 @@ def analyze(exp_path, save_results=True):
 
 if __name__ == "__main__":
     # e_path = Path("C:\\Users\\james\\Desktop\\latest2\\2022_04_03_02_11_48")
-    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_16_03_51_26")
+    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_18_09_48_45")
     analyze(e_path)

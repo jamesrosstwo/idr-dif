@@ -42,13 +42,12 @@ class TensorStackCache(DataCache):
 
 
 class AvgCache(DataCache):
-    def add_entry(self, key: str, val: Union[float, int]):
-        assert isinstance(val, float) or isinstance(val, int)
+    def add_entry(self, key: str, val: Union[float, int, torch.Tensor]):
+        assert isinstance(val, float) or isinstance(val, int) or isinstance(val, torch.Tensor)
         super().add_entry(key, val)
 
     def peek_all(self):
         return {k: sum(v) / len(v) for k, v in self._entries.items()}
-
 
 class ExpStorage:
     def __init__(self, out_location: Path, entries=None):

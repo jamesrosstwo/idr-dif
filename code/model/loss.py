@@ -54,8 +54,11 @@ class IDRLoss(nn.Module):
         mask_loss = self.get_mask_loss(model_outputs['sdf_output'], network_object_mask, object_mask)
 
         # Regularization of the deformations
-        deformation_magnitude = torch.max(torch.abs(model_outputs["deformation"]))
-        correction_magnitude = torch.max(torch.abs(model_outputs["correction"]))
+
+        # deformation_magnitude = torch.max(torch.abs(model_outputs["deformation"]))
+        # correction_magnitude = torch.max(torch.abs(model_outputs["correction"]))
+        deformation_magnitude = torch.linalg.norm(model_outputs["deformation"], dim=1).mean()
+        correction_magnitude = torch.abs(model_outputs["correction"]).mean()
         deform_loss = (deformation_magnitude + correction_magnitude)
 
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])

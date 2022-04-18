@@ -103,6 +103,7 @@ class ImplicitNetwork(nn.Module):
             if l < self.num_layers - 2:
                 x = self.softplus(x)
 
+
         if deform:
             x[:, :1] += scalar_correction
         if ret_deforms:

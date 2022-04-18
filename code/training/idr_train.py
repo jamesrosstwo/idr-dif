@@ -84,6 +84,8 @@ class IDRTrainRunner:
         else:
             self.storage = ExpStorage(storage_path)
 
+        self.storage.metadata["sdf_quantiles"] = torch.tensor([0, 0.25, 0.5, 0.75, 1]).cuda()
+
         self.storage.store("config", self.conf)
         if self.train_cameras:
             self.optimizer_cam_params_subdir = "OptimizerCamParameters"
@@ -315,6 +317,14 @@ class IDRTrainRunner:
 
     def backward(self, model_outputs, ground_truth):
         self.model.deform_reg_strength = self.get_deform_get_str()
+
+        quantiles = self.storage.metadata["sdf_quantiles"]
+        raw_sdf_outputs = model_outputs["sdf_output"] - model_outputs["correction"]
+        raw_sdf_quantiles = torch.quantile(raw_sdf_outputs.flatten(), quantiles)
+        sdf_quantiles = torch.quantile(model_outputs["sdf_output"].flatten(), quantiles)
+        num_sign_changes = torch.sum(torch.sign(model_outputs["sdf_output"]) != torch.sign(raw_sdf_outputs))
+        model_outputs["sign_changes"] = num_sign_changes
+
         loss_output = self.loss(model_outputs, ground_truth, self.optimization_steps)
         loss = loss_output['loss']
         # self.batch_cache.add_entry("loss", loss)
@@ -334,6 +344,10 @@ class IDRTrainRunner:
         if self.train_cameras:
             self.optimizer_cam.step()
 
+
+
+
+
         self.storage.cache("rgb_loss", loss_output['rgb_loss'].item())
         self.storage.cache("eikonal_loss", loss_output['eikonal_loss'].item())
         self.storage.cache("mask_loss", loss_output['mask_loss'].item())
@@ -342,8 +356,11 @@ class IDRTrainRunner:
         self.storage.cache("deform_reg_str", self.model.deform_reg_strength)
         self.storage.cache("optimization_steps", int(self.optimization_steps))
         self.storage.cache("epoch", self.optimization_steps // self.num_datapoints)
+        self.storage.cache("raw_sdf_quantiles", raw_sdf_quantiles)
+        self.storage.cache("sdf_quantiles", sdf_quantiles)
+        self.storage.cache("num_sign_changes", num_sign_changes.item())
 
-        if self.optimization_steps % 50 == 0:
+        if self.optimization_steps % 250 == 0:
             self.storage.pop_cache()
             epoch = self.optimization_steps // self.num_datapoints
             idx = self.optimization_steps % self.num_datapoints
@@ -408,15 +425,7 @@ class IDRTrainRunner:
                 model_outputs = self.model(model_input)
                 self.backward(model_outputs, ground_truth)
                 self.optimization_steps += 1
-            # self.scheduler.step()
+            self.scheduler.step()
 
     def get_deform_get_str(self):
-        # a = self.model.base_deform_reg / (
-        #         1 + (self.optimization_steps * self.model.deform_reg_decay))
-        # b = self.model.base_deform_reg * 0.1 - (20 * self.model.deform_reg_decay) * self.optimization_steps
-        # if self.optimization_steps > self.model.base_deform_reg:
-        #     out = b
-        # else:
-        #     out = a
-        # return max(out, 50)
         return self.model.base_deform_reg
