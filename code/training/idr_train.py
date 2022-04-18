@@ -162,6 +162,8 @@ class IDRTrainRunner:
             ]
         )
 
+        self.lat_vecs.requires_grad_(False)
+
         self.sched_milestones = self.conf.get_list('train.sched_milestones', default=[])
         self.sched_factor = self.conf.get_float('train.sched_factor', default=0.0)
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, self.sched_milestones,
@@ -298,7 +300,7 @@ class IDRTrainRunner:
                      model_input['pose'],
                      ground_truth['rgb'],
                      self.plots_dir,
-                     epoch * 1000 + i,
+                     epoch * 100000 + i,
                      self.img_res,
                      lat_vec=model_input["obj"],
                      hypo_params=self.model.hyper_net(model_input["obj"]),
@@ -327,7 +329,7 @@ class IDRTrainRunner:
         loss.backward()
 
         self.optimizer.step()
-        print(torch.linalg.norm(self.lat_vecs.weight.grad))
+        # print(torch.linalg.norm(self.lat_vecs.weight.grad))
 
         if self.train_cameras:
             self.optimizer_cam.step()

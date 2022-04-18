@@ -75,7 +75,7 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, x_in, hypo_params, latent_code, deform=True, ret_deforms=False):
+    def forward(self, x_in, hypo_params, latent_code, deform=False, ret_deforms=False):
         assert hypo_params is not None
 
         if deform or ret_deforms:
@@ -105,7 +105,7 @@ class ImplicitNetwork(nn.Module):
                 return x, adj_x[0, :, :3], scalar_correction
         return x
 
-    def gradient(self, x, hypo_params, latent_code, deform=True):
+    def gradient(self, x, hypo_params, latent_code, deform=False):
         x.requires_grad_(True)
         y = self.forward(x, hypo_params, latent_code, deform=deform)[:, :1]
         d_output = torch.ones_like(y, requires_grad=False, device=y.device)

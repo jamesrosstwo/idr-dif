@@ -37,7 +37,7 @@ def analyze(exp_path, save_results=True):
     latent_fig = px.line_3d(latent_df, x="axis0", y="axis1", z="axis2", color="idx")
 
     hists = storage.get_all("deformnet_magnitude")
-    n_traces = 4
+    n_traces = 2
     colors = n_colors('rgb(200, 10, 10)', 'rgb(5, 200, 200)', n_traces, colortype='rgb')
 
     deform_fig = go.Figure()
@@ -73,5 +73,5 @@ def analyze(exp_path, save_results=True):
 
 if __name__ == "__main__":
     # e_path = Path("C:\\Users\\james\\Desktop\\latest2\\2022_04_03_02_11_48")
-    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_15_02_24_32")
+    e_path = Path("C:\\Users\\james\\Desktop\\projects\\dsci\\idr\\exps\\srn_fixed_cameras_1\\2022_04_16_03_51_26")
     analyze(e_path)
