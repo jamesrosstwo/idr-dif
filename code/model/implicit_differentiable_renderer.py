@@ -75,7 +75,7 @@ class ImplicitNetwork(nn.Module):
 
         self.softplus = nn.Softplus(beta=100)
 
-    def forward(self, x_in, hypo_params, latent_code, deform=False, ret_deforms=False):
+    def forward(self, x_in, hypo_params, latent_code, deform, ret_deforms=False):
         assert hypo_params is not None
 
         deformation = torch.zeros(x_in.shape[1], 3)
@@ -109,7 +109,7 @@ class ImplicitNetwork(nn.Module):
             return x, deformation, scalar_correction
         return x
 
-    def gradient(self, x, hypo_params, latent_code, deform=False):
+    def gradient(self, x, hypo_params, latent_code, deform):
         x.requires_grad_(True)
         y = self.forward(x, hypo_params, latent_code, deform=deform)[:, :1]
         d_output = torch.ones_like(y, requires_grad=False, device=y.device)
@@ -197,6 +197,7 @@ class IDRNetwork(nn.Module):
         rendering_conf = conf.get_config('rendering_network')
         rendering_conf["latent_vector_size"] = latent_code_dim
 
+        self.should_deform = conf["deform"]
         # Deform-Net
         deform_config = conf.get_config("deform_network")
         self.deform_net = dif_modules.SingleBVPNet(mode='mlp', in_features=3, out_features=4, **deform_config)
@@ -235,7 +236,7 @@ class IDRNetwork(nn.Module):
         self.implicit_network.eval()
         with torch.no_grad():
             points, network_object_mask, dists = self.ray_tracer(
-                sdf=lambda x: self.implicit_network(x, hypo_params, latent_code)[:, 0],
+                sdf=lambda x: self.implicit_network(x, hypo_params, latent_code, self.should_deform)[:, 0],
                 cam_loc=cam_loc,
                 object_mask=object_mask,
                 ray_directions=ray_dirs)
@@ -245,7 +246,7 @@ class IDRNetwork(nn.Module):
         points = (cam_loc.unsqueeze(1) + dists.reshape(batch_size, num_pixels, 1) * ray_dirs).reshape(-1, 3)
 
         sdf_output, deformations, scalar_correction = \
-            self.implicit_network.forward(points, hypo_params, latent_code, ret_deforms=True)
+            self.implicit_network.forward(points, hypo_params, latent_code, self.should_deform, ret_deforms=True)
         sdf_output = sdf_output[:, 0:1]
         ray_dirs = ray_dirs.reshape(-1, 3)
 
@@ -268,12 +269,13 @@ class IDRNetwork(nn.Module):
 
             points_all = torch.cat([surface_points, eikonal_points], dim=0)
 
-            output = self.implicit_network(surface_points, hypo_params, latent_code)
+            output = self.implicit_network(surface_points, hypo_params, latent_code, self.should_deform)
             surface_sdf_values = output[:N, 0:1].detach()
 
-            g = self.implicit_network.gradient(points_all, hypo_params, latent_code)
+            g = self.implicit_network.gradient(points_all, hypo_params, latent_code, self.should_deform)
             surface_points_grad = g[:N, 0, :].clone().detach()
-            grad_theta = self.implicit_network.gradient(points_all, hypo_params, latent_code, deform=False)[N:, 0, :]
+            # For eikonal loss. Don't include deformations.
+            grad_theta = self.implicit_network.gradient(points_all, hypo_params, latent_code, False)[N:, 0, :]
 
             differentiable_surface_points = self.sample_network(surface_output,
                                                                 surface_sdf_values,
@@ -309,7 +311,9 @@ class IDRNetwork(nn.Module):
     def get_rbg_value(self, points, view_dirs, latent_code):
 
         hypo_params = self.hyper_net(latent_code)
-        output = self.implicit_network(points, hypo_params, latent_code)
+        output = self.implicit_network(points, hypo_params, latent_code, self.should_deform)
+
+        # Do not deform here to avoid normals issues
         g = self.implicit_network.gradient(points, hypo_params, latent_code, deform=False)
         normals = torch.zeros(g[:, 0, :].shape).cuda()
         v_dirs = torch.zeros(view_dirs.shape).cuda()

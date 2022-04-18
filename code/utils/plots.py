@@ -35,7 +35,7 @@ def plot(model, indices, model_outputs, pose, rgb_gt, path, epoch, img_res, plot
     data = []
 
     def sdf_plot(x):
-        return model.implicit_network(x, hypo_params, lat_vec)[:, 0]
+        return model.implicit_network(x, hypo_params, lat_vec, model.should_deform)[:, 0]
 
     # plot surface
     surface_traces = get_surface_trace(path=path,
@@ -57,7 +57,7 @@ def plot(model, indices, model_outputs, pose, rgb_gt, path, epoch, img_res, plot
         sampling_idx = torch.randperm(p.shape[0])[:2048]
         p = p[sampling_idx, :]
 
-        val = model.implicit_network(p, hypo_params, lat_vec)
+        val = model.implicit_network(p, hypo_params, lat_vec, model.should_deform)
         caption = ["sdf: {0} ".format(v[0].item()) for v in val]
 
         data.append(get_3D_scatter_trace(p.detach(), name='intersection_points_{0}'.format(i), caption=caption))
