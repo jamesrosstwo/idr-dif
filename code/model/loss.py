@@ -61,6 +61,8 @@ class IDRLoss(nn.Module):
         correction_magnitude = torch.abs(model_outputs["correction"]).mean()
         deform_loss = (deformation_magnitude + correction_magnitude)
 
+        deform_loss += model_outputs["sign_changes"] / 300
+
         eikonal_loss = self.get_eikonal_loss(model_outputs['grad_theta'])
 
         loss = self.rgb_weight * rgb_loss + \

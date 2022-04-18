@@ -78,8 +78,8 @@ class ImplicitNetwork(nn.Module):
     def forward(self, x_in, hypo_params, latent_code, deform, ret_deforms=False):
         assert hypo_params is not None
 
-        deformation = torch.zeros(x_in.shape[1], 3)
-        scalar_correction = torch.zeros(x_in.shape[1], 1)
+        deformation = torch.zeros(x_in.shape[0], 3).cuda()
+        scalar_correction = torch.zeros(x_in.shape[0], 1).cuda()
 
         x_deform = x_in
         if deform:
