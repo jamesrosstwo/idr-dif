@@ -78,11 +78,16 @@ class ImplicitNetwork(nn.Module):
     def forward(self, x_in, hypo_params, latent_code, deform=False, ret_deforms=False):
         assert hypo_params is not None
 
-        if deform or ret_deforms:
+        deformation = torch.zeros(x_in.shape[1], 3)
+        scalar_correction = torch.zeros(x_in.shape[1], 1)
+
+        x_deform = x_in
+        if deform:
             adj_x = self.deform_net(x_in, params=hypo_params)["model_out"]
-            x_deform = x_in + adj_x[0, :, :3]
-        else:
-            x_deform = x_in
+            deformation = adj_x[0, :, :3]
+            scalar_correction = adj_x[0, :, 3:]
+            x_deform = x_in + deformation
+
         if self.embed_fn is not None:
             x_deform = self.embed_fn(x_deform)
         x = x_deform
@@ -98,11 +103,10 @@ class ImplicitNetwork(nn.Module):
             if l < self.num_layers - 2:
                 x = self.softplus(x)
 
-        if deform or ret_deforms:
-            scalar_correction = adj_x[0, :, 3:]
+        if deform:
             x[:, :1] += scalar_correction
-            if ret_deforms:
-                return x, adj_x[0, :, :3], scalar_correction
+        if ret_deforms:
+            return x, deformation, scalar_correction
         return x
 
     def gradient(self, x, hypo_params, latent_code, deform=False):
